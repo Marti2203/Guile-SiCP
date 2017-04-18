@@ -1,0 +1,10 @@
+(define (abs x) (if (< x 0) (- x) x) )
+(define (square x) (* x x) )
+(define (cube x) (* x x x) )
+(define (cubeguess guess x) (/ (+ (* 2.0 guess) (/ x (square guess) ) ) 3 ) )
+(define (cube-guess-good? guess x) 
+	(if 
+		( < (abs (- guess (cubeguess guess x) ) ) 0.0001 ) 
+	#t #f ) )
+(define (cube-iter guess x) (if (cube-guess-good? guess x) guess (cube-iter (cubeguess guess x) x ) ) )
+(define (crt x) (cube-iter 1.0 x) )
