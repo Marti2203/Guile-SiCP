@@ -1,635 +1,165 @@
-(define-syntax cons-stream
-  (syntax-rules ()
-		((_ a b) (cons a (delay b)))))
-(define (stream-car stream) (car stream))
-(define (stream-cdr stream) (force (cdr stream)))
-(define (stream-null? a) (null? a))
-(define the-empty-stream '())
+(load "streams.base.scm")
+(load "evaluator.base.scm")
+(load "table.base.scm")
 
-(define (stream-ref s n)
-  (if (= n 0)
-    (stream-car s)
-    (stream-ref (stream-cdr s) (- n 1))))
-(define (stream-map proc s)
-  (if (stream-null? s)
-    the-empty-stream
-    (cons-stream (proc (stream-car s))
-		 (stream-map proc (stream-cdr s)))))
-(define (stream-for-each proc s)
-  (if (stream-null? s)
-    'done
-    (begin 	
-      (proc (stream-car s))
-      (stream-for-each proc (stream-cdr s)))))
-(define (display-stream s) (stream-for-each display-line s))
-(define (display-line x) (newline) (display x))
-
-(define (stream-enumerate-interval low high)
-  (if (> low high)
-    the-empty-stream
-    (cons-stream
-      low
-      (stream-enumerate-interval (+ low 1) high))))
-
-(define (stream-filter pred stream)
+(define (eval-m exp env)
   (cond 
-    ((stream-null? stream) the-empty-stream)
-    ((pred (stream-car stream))
-     (cons-stream (stream-car stream)
-		  (stream-filter pred (stream-cdr stream))))
-    (else (stream-filter pred (stream-cdr stream)))))
-
-(define (stream-map-l proc . argstreams)
-  (if (stream-null? (car argstreams))
-    the-empty-stream
-    (cons-stream
-      (apply proc (map stream-car argstreams))
-      (apply stream-map-l (cons proc (map stream-cdr argstreams))))))
-
-(define (stream-append stream-1 stream-2)
-  (if (stream-null? stream-1)
-    stream-2
-    (cons-stream (stream-car stream-1) (stream-append (stream-cdr stream-1) stream-2))))
-
-(define (square x) (* x x))
-(define cache '())
-(define cache-size 0)
-(define true #t)
-(define false #f)
-(define (tagged-list? exp-m tag)
-  (if (pair? exp-m)
-    (eq? (car exp-m) tag)
-    false))
-
-(define (primitive-procedure? proc) (tagged-list? proc 'primitive))
-(define (self-evaluating? exp-m)
-  (cond
-    ((boolean? exp-m) true)
-    ((number? exp-m) true)
-    ((string? exp-m) true)
-    (else false)))
-
-(define (make-lambda parameters body) (cons 'lambda (cons parameters body)))
-(define (make-if predicate consequent alternative) (list 'if predicate consequent alternative))
-(define (make-begin seq) (cons 'begin seq))
-(define (make-define name parameters body) (cons 'define (cons (cons name parameters) body)))
-(define (make-let parameters body) (cons 'let (cons parameters body)))
-(define (make-procedure-no-define parameters body env) (list 'procedure parameters (scan-out-defines body) env))
-(define (make-procedure parameters body env) (list 'procedure parameters body env))
-(define (make-set variable value) (list 'set! variable value))
-(define (make-delay exp-m) (cons 'delay exp-m))
-
-(define (variable? exp-m) (symbol? exp-m))
-(define (quoted? exp-m) (tagged-list? exp-m 'quote))
-(define (assignment? exp-m) (tagged-list? exp-m 'set!))
-(define (definition? exp-m) (tagged-list? exp-m 'define))
-(define (lambda? exp-m) (tagged-list? exp-m 'lambda))
-(define (if? exp-m) (tagged-list? exp-m 'if))
-(define (begin? exp-m) (tagged-list? exp-m 'begin))
-(define (application? exp-m) (pair? exp-m))
-(define (cond? exp-m) (tagged-list? exp-m 'cond))
-(define (or? exp-m) (tagged-list? exp-m 'or))
-(define (and? exp-m) (tagged-list? exp-m 'and))
-(define (let*? exp-m) (tagged-list? exp-m 'let*))
-(define (do? exp-m) (tagged-list exp-m 'do))
-(define (compound-procedure? exp-m) (tagged-list? exp-m 'procedure))
-(define (unbind? exp-m) (tagged-list? exp-m 'unbind))
-(define (delay? exp-m) (tagged-list? exp-m 'delay))
-(define (force? exp-m) (tagged-list? exp-m 'force))
-(define (cached? exp-m) (tagged-list? exp-m 'cache))
-(define (values? exp-m) (tagged-list? exp-m 'values))
-(define (env? exp-m) (tagged-list? exp-m 'env))
-(define (letrec? exp-m) (tagged-list? exp-m 'letrec))
-(define (require? exp-m) (tagged-list? exp-m 'require))
-
-
-
-
-(define (prime? n) (= n (smallest-divisor n)))
-(define (smallest-divisor n) (if(divides? 2 n) 2 (find-divisor n 3)))
-(define (find-divisor n test-divisor) (cond
-					((> (square test-divisor) n) n) 
-					((divides? test-divisor n) test-divisor)
-					(else (find-divisor n (+ test-divisor 2)))))
-(define (divides? a b) (= (remainder b a) 0))
-
-(define (unless? exp-m) (tagged-list? exp-m 'unless))
-(define (lambda-lazy? exp-m) (tagged-list? exp-m 'lambda-lazy))
-(define (list-lazy? exp-m) (tagged-list? exp-m 'list))
-(define (amb? exp-m) (tagged-list? exp-m 'amb))
-(define (ramb? exp-m) (tagged-list? exp-m 'ramb))
-(define (permanent-assignment? exp-m) (tagged-list? exp-m 'permanent-set!))
-(define (if-fail? exp-m) (tagged-list? exp-m 'if-fail))
-
-(define (eval-m exp-m env)
-  (cond 
-    ((self-evaluating? exp-m) exp-m)
-    ((variable? exp-m) (lookup-variable-value exp-m env))
-    ((quoted? exp-m) (text-of-quotation exp-m))
-    ((cached? exp-m) (list-ref cache (cache-index exp-m))) 
-    ((assignment? exp-m) (eval-m-assignment exp-m env))
-    ((definition? exp-m) (eval-m-definition exp-m env))
-    ((values? exp-m) (list-of-values (exp-values exp-m) env))
-    ((if? exp-m) (eval-m-if exp-m env))
-    ((and? exp-m) (eval-m-and exp-m env))
-    ((or? exp-m) (eval-m-or exp-m env))
-    ((let? exp-m) (eval-m (let->combination exp-m) env))
-    ((lambda? exp-m)
-     (make-procedure (lambda-parameters exp-m)
-		     (lambda-body exp-m)
+    ((self-evaluating? exp) exp)
+    ((variable? exp) (lookup-variable-value exp env))
+    ((quoted? exp) (text-of-quotation exp))
+    ((cached? exp) (list-ref cache (cache-index exp))) 
+    ((assignment? exp) (eval-m-assignment exp env))
+    ((definition? exp) (eval-m-definition exp env))
+    ((values? exp) (list-of-values (exp-values exp) env))
+    ((if? exp) (eval-m-if exp env))
+    ((and? exp) (eval-m-and exp env))
+    ((or? exp) (eval-m-or exp env))
+    ((let? exp) (eval-m (let->combination exp) env))
+    ((lambda? exp)
+     (make-procedure (lambda-parameters exp)
+		     (lambda-body exp)
 		     env))
-    ((begin? exp-m) (eval-m-sequence (begin-actions exp-m) env))
-    ((cond? exp-m) (eval-m (cond->if exp-m) env))
-    ((unbind? exp-m) (unbind (unbind-variable exp-m) env))
-    ((let*? exp-m) (eval-m (let*->nested exp-m) env))
-    ((letrec? exp-m)(eval-m (letrec->let exp-m) env))
-    ((delay? exp-m) (make-delay (delay-expression exp-m)))
-    ((force? exp-m) (eval-m (delay-expression exp-m) env))
-    ((env? exp-m) env)
-    ((unless? exp-m) (eval-m (unless->if exp-m) env))
-    ((application? exp-m)
-     (apply-m (eval-m (operator exp-m) env)
-	    (list-of-values (operands exp-m) env)))
-    (else (error "Unknown exp-mression type -- EVAL" exp-m))))	
-
-(define (eval-m-lou exp-m env)
-  (cond 
-    ((self-evaluating? exp-m) exp-m)
-    ((variable? exp-m) (lookup-variable-value exp-m env))
-    ((quoted? exp-m) (text-of-quotation exp-m))
-    ((application-lou? exp-m)
-     (apply-m (eval-m (operator-lou exp-m) env)
-	    (list-of-values (operands-lou exp-m) env)))
-    ((assignment? exp-m) (eval-m-assignment exp-m env))
-    ((definition? exp-m) (eval-m-definition exp-m env))
-    ((if? exp-m) (eval-m-if exp-m env))
-    ((lambda? exp-m)
-     (make-procedure (lambda-parameters exp-m)
-		     (lambda-body exp-m)
-		     env))
-    ((begin? exp-m) (eval-m-sequence (begin-actions exp-m) env))
-    ((cond? exp-m) (eval-m (cond->if exp-m) env))
-    (else (error "Unknown exp-mression type -- EVAL" exp-m))))
-
-(define (apply-m procedure arguments)
-  (cond 
-    ((primitive-procedure? procedure) (apply-primitive-procedure procedure arguments))
-    ((compound-procedure? procedure) (eval-m-sequence
-				       (procedure-body procedure)
-				       (extend-environment (procedure-parameters procedure) arguments (procedure-environment procedure))))
-    (else (error "Unknown procedure type -- APPLY" procedure))))
-
-(define (list-of-values exp-ms env)
-(if (no-operands? exp-ms)
-  '()
-  (cons (eval-m (first-operand exp-ms) env)
-	(list-of-values (rest-operands exp-ms) env))))
-
-(define (eval-m-if exp-m env)
-  (if 
-    (true? (eval-m (if-predicate exp-m) env))
-    (eval-m (if-consequent exp-m) env)
-    (eval-m (if-alternative exp-m) env)))
-
-(define (eval-m-sequence exp-ms env)
-  (cond 
-    ((last-exp-m? exp-ms) (eval-m (first-exp-m exp-ms) env))
-    (else (eval-m (first-exp-m exp-ms) env)
-	  (eval-m-sequence (rest-exp-ms exp-ms) env))))
-
-(define (eval-m-assignment exp-m env)
-  (set-variable-value! (assignment-variable exp-m)
-		       (eval-m (assignment-value exp-m) env)
-		       env)
+    ((begin? exp) (eval-m-sequence (begin-actions exp) env))
+    ((cond? exp) (eval-m (cond->if exp) env))
+    ((unbind? exp) (unbind (unbind-variable exp) env))
+    ((let*? exp) (eval-m (let*->nested exp) env))
+    ((letrec? exp)(eval-m (letrec->let exp) env))
+    ((delay? exp) (make-delay (delay-expression exp)))
+    ((force? exp) (eval-m (delay-expression exp) env))
+    ((env? exp) env)
+    ((unless? exp) (eval-m (unless->if exp) env))
+    ((application? exp)
+     (apply-m (eval-m (operator exp) env)
+	    (list-of-values (operands exp) env)))
+    (else (error "Unknown expression type -- EVAL" exp)))	
   'ok)
 
 
-(define (make-table)
-  (let ((local-table (list '*table*)))
-    (define (lookup key-1 key-2)
-      (let ((subtable (assoc key-1 (cdr local-table))))
-	(if subtable
-	  (let ((record (assoc key-2 (cdr subtable))))
-	    (if record (cdr record) false))
-	  false)))
-    (define (insert! key-1 key-2 value)
-      (let ((subtable (assoc key-1 (cdr local-table))))
-	(if subtable
-	  (let ((record (assoc key-2 (cdr subtable))))
-	    (if record
-	      (set-cdr! record value)
-	      (set-cdr! subtable (cons (cons key-2 value) (cdr subtable)))))
-	  (set-cdr! local-table
-		    (cons (list 
-			    key-1
-				(cons key-2 value))
-			  (cdr local-table))))))
-    (define (dispatch m)
-      (cond 
-	((eq? m 'lookup-proc) lookup)
-	((eq? m 'insert-proc!) insert!)
-	(else (error "Unknown operation -- TABLE" m))))
-    dispatch))
-
-(define operation-table (make-table))
-(define get (operation-table 'lookup-proc))
-(define put (operation-table 'insert-proc!))
-
-(define (eval-m-definition exp-m env)
-  (define-variable! (definition-variable exp-m)
-		    (eval-m (definition-value exp-m) env)
+(define (eval-m-definition exp env)
+  (define-variable! (definition-variable exp)
+		    (eval-m (definition-value exp) env)
 		    env)
   'ok)
 
-(define (get-type exp-m) (car exp-m)) 
-(define (eval-m-table exp-m env) ((get 'eval-m (get-type exp-m)) exp-m env))
+(define (get-type exp) (car exp)) 
+(define (eval-m-table exp env) ((get 'eval-m (get-type exp)) exp env))
 
 (define (eval-m-order)
   (define (finder)
-  (define state 2)
-  (define (work i)
-  (if  (= state 2)
-   (cond
-     ((= i 0) (set! state 0)) 
-     ((= i 1) (set! state 1)) 
-     (else 2))
-   state))
- work)
+    (define state 2)
+    (define (work i)
+      (if  (= state 2)
+	(cond
+	  ((= i 0) (set! state 0)) 
+	  ((= i 1) (set! state 1)) 
+	  (else 2))
+	state))
+    work)
   (let ((state (finder))) (if (= (+ (state 0) (state 1)) 0) 'left 'right)))
 
 
-(define (list-of-values-special exp-ms env order)
+(define (list-of-values-special exps env order)
   (define (work current)
     (if (no-operands? current)
       '()
       (cons (eval-m (first-operand current) env)
-	    (work (rest-operands exp-ms) env))))
+	    (work (rest-operands exps) env))))
   (if (eq? order (eval-m-order))
-    (work exp-ms)
-    (work (reverse exp-ms))))
+    (work exps)
+    (work (reverse exps))))
 
-(define (order-exp-ms exp-ms order)
+(define (order-exps exps order)
     (if (eq? order (eval-m-order))
-    exp-ms
-    (reverse exp-ms)))
-
-(define (text-of-quotation exp-m) (cadr exp-m))
-
-(define (text-of-quotation-special exp-m env)
-  (define (list-create input)
-    (if (null? input) ''() (list 'cons (list 'quote (car input)) (list-create (cdr input)))))
-  (let ((input (cadr exp-m)))
-    (cond 
-      ((null? input) '())
-      ((or (number? input) (symbol? input)) input)
-      ((list? input) (eval-m-lazy (list-create input) env))
-      ((pair? input) (eval-m-lazy (list 'cons (list 'quote (car input)) (list 'quote (cdr input))) env))
-      )))
-
-(define (assignment-variable exp-m) (cadr exp-m))
-(define (assignment-value exp-m) (caddr exp-m))
-
-(define (definition-variable exp-m)
-  (if (symbol? (cadr exp-m))
-    (cadr exp-m)
-    (caadr exp-m)))
-
-(define (definition-value exp-m)
-  (if (symbol? (cadr exp-m))
-    (caddr exp-m)
-    (make-lambda (cdadr exp-m) ; formal parameters
-		 (cddr exp-m)))) ; body
-
-(define (definition-parameters exp-m) (cdadr exp-m))
-
-(define (lambda-parameters exp-m) (cadr exp-m))
-(define (lambda-body exp-m) (cddr exp-m))
-
-(define (if-predicate exp-m) (cadr exp-m))
-(define (if-consequent exp-m) (caddr exp-m))
-(define (if-alternative exp-m)
-  (if (not (null? (cdddr exp-m)))
-    (cadddr exp-m)
-    'false))
-
-(define (begin-actions exp-m) (cdr exp-m))
-(define (last-exp-m? seq) (null? (cdr seq)))
-(define (first-exp-m seq) (car seq))
-(define (rest-exp-ms seq) (cdr seq))
-
-(define (sequence->exp-m seq)
-  (cond 
-    ((null? seq) seq)
-    ((last-exp-m? seq) (first-exp-m seq))
-    (else (make-begin seq))))
-
-(define (operator exp-m) (car exp-m))
-(define (operands exp-m) (cdr exp-m))
-(define (no-operands? ops) (null? ops))
-(define (first-operand ops) (car ops))
-(define (rest-operands ops) (cdr ops))
-
-(define (application-lou? exp-m) (tagged-list exp-m 'call))
-(define (operator-lou exp-m) (cadr exp-m))
-(define (operands-lou exp-m) (cddr exp-m))
-
-
-(define (cond-clauses exp-m) (cdr exp-m))
-(define (cond-else-clause? clause) (eq? (cond-predicate clause) 'else))
-(define (cond-predicate clause) (car clause))
-(define (cond-special-proc clasuse) (caddr clause))
-(define (predicate-special? clause) (and (= (length clause) 3) (eq? '=> (caddr clause))))
-(define (cond-actions clause) (cdr clause))
+    exps
+    (reverse exps)))
 
 (define cond-test '(cond ((= x 5) 4) ((= x 6) 5) ) )
-(define (cond->if exp-m) (exp-mand-clauses (cond-clauses exp-m)))
-(define (exp-mand-clauses clauses)
+(define (cond->if exp) (expand-clauses (cond-clauses exp)))
+(define (expand-clauses clauses)
   (if (null? clauses)
     'false ; no else clause
-    (let ((first (car clauses))
-	  (rest (cdr clauses)))
+    (let ((first (first-clause clauses))
+	  (rest (rest-clauses clauses)))
       (if (cond-else-clause? first)
 	(if (null? rest)
-	  (sequence->exp-m (cond-actions first))
+	  (sequence->exp (cond-actions first))
 	  (error "ELSE clause isn’t last -- COND->IF" clauses))
 	  (make-if (cond-predicate first)
 		   (if (predicate-special? first)
 		     (apply-m (cond-special-proc first) (cond-predicate first))
-		     (sequence->exp-m (cond-actions first)))
-		   (exp-mand-clauses rest))))))
+		     (sequence->exp (cond-actions first)))
+		   (expand-clauses rest))))))
 
 
 
-(define (and->if exp-m env)
+(define (and->if exp env)
   (define (work elements)
     (if (null? (rest-operands elements)) 
       (first-operand elements)
       (make-if (first-operand elements)
 	       (work (rest-operands elements))
 	       false)))
-(work (order-exp-ms (operands exp-m) 'right)))
+(work (order-exps (operands exp) 'right)))
 
-(define (or->if exp-m env)
+(define (or->if exp env)
   (define (work elements)
     (if (null? (rest-operands elements)) 
       (first-operand elements)
       (make-if (first-operand elements)
 	       true
 	       (work (rest-operands elements)))))
-(work (order-exp-ms (operands exp-m) 'right)))
+(work (order-exps (operands exp) 'right)))
 
-(define (eval-m-and exp-m env)
+(define (eval-m-and exp env)
   (define (work elements)
   (cond
     ((null? elements) true)
     ((false? (eval-m (first-operand elements) env) false)
     (else (work (rest-operands elements))))))
- (work (order-exp-ms (operands exp-m) 'right)))
+ (work (order-exps (operands exp) 'right)))
 
-(define (eval-m-or exp-m env)
+(define (eval-m-or exp env)
   (define (work elements)
   (cond
     ((null? elements) false)
     ((true? (eval-m (first-operand element) env) true)
     (else (work (rest-operands elements))))))
-  (work (order-exp-ms (operands exp-m) 'right)))
+  (work (order-exps (operands exp) 'right)))
 
 
-(define (let? exp-m) (tagged-list? exp-m 'let))
-
-(define (let-special? exp-m) (= 4 (length exp-m)))
-(define (let-special-name exp-m) (cadr exp-m))
-(define (let-special-pairs exp-m) (caddr exp-m))
-(define (let-special-parameters exp-m) (map let-parameter (let-special-pairs exp-m)))
-(define (let-special-expressions exp-m) (map let-expression (let-special-pairs exp-m)))
-(define (let-special-body exp-m) (cdddr exp-m))
-
-(define (let-pairs exp-m) (cadr exp-m))
-(define (let-body exp-m) (cddr exp-m))
-(define (let-parameter pair) (car pair))
-(define (let-expression pair) (cadr pair))
-(define (let-parameters exp-m) (map let-parameter (let-pairs exp-m)))
-(define (let-expressions exp-m) (map let-expression (let-pairs exp-m)))
-(define (let->combination exp-m) ;(if (let-special? exp-m)
-				;	(let ((parameters (let-special-parameters exp-m)) (body (let-special-body exp-m)))	
-				;	  (display exp-m)
+(define (let->combination exp) ;(if (let-special? exp)
+				;	(let ((parameters (let-special-parameters exp)) (body (let-special-body exp)))	
+				;	  (display exp)
 				;	  (make-begin (list
-				;		       (make-define (let-special-name exp-m) parameters body)
-				;		       (cons (let-special-name exp-m) (let-special-expressions exp-m)))))
+				;		       (make-define (let-special-name exp) parameters body)
+				;		       (cons (let-special-name exp) (let-special-expressions exp)))))
 					  (cons
-					    (make-lambda (let-parameters exp-m) (let-body exp-m))
-					    (let-expressions exp-m)));)
+					    (make-lambda (let-parameters exp) (let-body exp))
+					    (let-expressions exp)));)
 
 (define let*-test '(let* ((x (* 2 3)) (y (* 3 x))) (* x y)))
 (define let-test '(let ((x (* 2 3)) (y (* 3 6))) (* x y)))
 (define let-special-test '(define (fib n) 
 			    (let fib-iter ((a 1) (b 0) (count n)) (if (= count 0) b (fib-iter (+ a b) a (- count 1))))) )
 
-
-(define (let*->nested-lets exp-m)
+(define (let*->nested-lets exp)
   (define (work pairs body)
   (if (null? pairs)
      body
     (work (cdr pairs) (make-let (car pairs) body))))
-  (work (order-exp-ms (let-pairs exp-m) 'right) (let-body exp-m)))
+  (work (order-exps (let-pairs exp) 'right) (let-body exp)))
 
-(define (unless->if exp-m) (make-if (cons ('not (if-predicate exp-m))) (if-alternative exp-m) (if-consequent exp-m)))
+(define (unless->if exp) (make-if (cons ('not (if-predicate exp))) (if-alternative exp) (if-consequent exp)))
 
-(define (do-init-triplets exp-m) (cadr exp-m))
-(define (do-init-vars exp-m) (map car (do-init-triplets exp-m)))
-(define (do-init-starters exp-m) (map cadr (do-init-triplets exp-m)))
-(define (do-init-steps exp-m) (map caddr (do-init-triplets exp-m)))
-(define (do-test exp-m) (cadddr exp-m))
-(define (do-test-condition exp-m) (car (do-test exp-m)))
-(define (do-test-end exp-m) (cdr (do-test exp-m)))
-(define (do-tests exp-m) (caddr exp-m))
-(define (do-commands exp-m) (cadddr exp-m))
-
-(define (true? x) (not (eq? x false)))
-(define (false? x) (eq? x false))
-
-(define (procedure-parameters p) (cadr p))
-(define (procedure-body p) (caddr p))
-(define (procedure-environment p) (cadddr p))
-
-(define (enclosing-environment env) (cdr env))
-(define (first-frame env) (car env))
-(define the-empty-environment '())
-
-(define (make-frame variables values) (cons variables values))
-(define (frame-variables frame) (car frame))
-(define (frame-values frame) (cdr frame))
-(define (add-binding-to-frame! var val frame)
-  (set-car! frame (cons var (frame-variables frame)))
-  (set-cdr! frame (cons val (frame-values frame))))
-
-
-(define (extend-environment vars vals base-env)
-  (if (= (length vars) (length vals))
-    (cons (make-frame vars vals) base-env)
-    (if (< (length vars) (length vals))
-      (error "Too many arguments supplied" vars vals)
-      (error "Too few arguments supplied" vars vals))))
-
-(define (lookup-variable-value var env)
-  (define (env-loop env)
-    (define (scan vars vals)
-      (cond 
-	((null? vars) (env-loop (enclosing-environment env)))
-	((eq? var (car vars)) (let ((value (car vals))) (if (eq? value '*unassigned*) 
-							  (error "UNASSIGNED VARIABLE" var)
-							  value)))
-	(else (scan (cdr vars) (cdr vals)))))
-    (if (eq? env the-empty-environment)
-      (error "Unbound variable" var)
-      (let ((frame (first-frame env)))
-	(scan (frame-variables frame)
-	      (frame-values frame)))))
-  (env-loop env))
-
-(define (has-variable-value? var env)
-  (define (env-loop env)
-    (define (scan vars vals)
-      (cond 
-	((null? vars) (env-loop (enclosing-environment env)))
-	((eq? var (car vars)) (let ((value (car vals))) (if (eq? value '*unassigned*) false true)))
-	(else (scan (cdr vars) (cdr vals)))))
-    (if (eq? env the-empty-environment) false
-      (let ((frame (first-frame env)))
-	(scan (frame-variables frame)
-	      (frame-values frame)))))
-  (env-loop env))
-
-
-(define (set-variable-value! var val env)
-  (define (env-loop env)
-    (define (scan vars vals)
-      (cond 
-	((null? vars) (env-loop (enclosing-environment env)))
-	((eq? var (car vars)) (set-car! vals val))
-	(else (scan (cdr vars) (cdr vals)))))
-    (if (eq? env the-empty-environment)
-      (error "Unbound variable -- SET!" var)
-      (let ((frame (first-frame env)))
-	(scan (frame-variables frame)
-	      (frame-values frame)))))
-  (env-loop env))
-
-(define (define-variable! var val env)
-  (let ((frame (first-frame env)))
-    (define (scan vars vals)
-      (cond 
-	((null? vars)  (add-binding-to-frame! var val frame))
-	((eq? var (car vars)) (set-car! vals val))
-	(else (scan (cdr vars) (cdr vals)))))
-    (scan (frame-variables frame)
-	  (frame-values frame))))
-
-(define (traverse-env var val env null-action eq-action error-action)
-  (define (scan vars vals frame)
-    (cond 
-      ((null? vars) (null-action var val frame env))
-      ((eq? var (car vars)) (eq-action vals val))
-      (else (scan (cdr vars) (cdr vals) frame))))
-  (if (eq? env the-empty-environment)
-    (error-action var)
-    (let ((frame (first-frame env)))
-      (scan (frame-variables frame)
-	    (frame-values frame)
-	    frame))))
-
-(define (unbind-variable exp-m) (cadr exp-m))
-(define (unbind var env)
-    (define (env-loop env)
-      (define (scan vars vals)
-	(cond 
-	  ((null? vars) (env-loop (enclosing-environment env)))
-	  ((eq? var (car vars)) 
-	   (set! vals (cdr vals))
-	   (set! vars (cdr vars)))
-	  (else (scan (cdr vars) (cdr vals)))))
-      (if (eq? env the-empty-environment)
-	(error "Unbound variable -- UNBIND!" var)
-	(let ((frame (first-frame env)))
-	  (scan (frame-variables frame)
-		(frame-values frame)))))
-    (env-loop env))
-
-
-(define (make-frame-pairs variables values) (map (lambda (x y) (cons x y)) variables values))
-(define (frame-pairs-variables frame) (map car frame))
-(define (frame-pairs-values frame) (map cdr frame))
-(define (add-binding-to-frame-pairs! pair frame) (set-car! frame (cons pair frame)))
-
-(define (first-variable frame) (caar frame))
-(define (first-value frame) (cadr frame))
-(define (variable pair) (car pair))
-(define (value pair) (cdr pair))
-
-(define (extend-environment-pairs vars vals base-env)
-  (if (= (length vars) (length vals))
-    (cons (make-frame-pairs vars vals) base-env)
-    (if (< (length vars) (length vals))
-      (error "Too many arguments supplied" vars vals)
-      (error "Too few arguments supplied" vars vals))))
-
-(define (lookup-variable-value-pairs var env)
-  (define (env-loop env)
-    (define (scan pairs)
-      (cond 
-	((null? pairs) (env-loop (enclosing-environment env)))
-	((eq? var (first-variable pairs)) (cdar pairs))
-	(else (scan (cdr pairs)))))
-    (if (eq? env the-empty-environment)
-      (error "Unbound variable -- LOOKUP!" var)
-	(scan (first-frame env))))
-  (env-loop env))
-
-
-(define (set-variable-value-pairs! pair env)
-  (define (env-loop env)
-    (define (scan pairs)
-      (cond 
-	((null? pairs) (env-loop (enclosing-environment env)))
-	((eq? (variable pair) (first-variable pairs)) (set-car! (car pairs) (value pair)))
-	(else (scan (cdr pairs)))))
-    (if (eq? env the-empty-environment)
-      (error "Unbound variable -- SET!" var)
-	(scan (first-frame env))))
-  (env-loop env))
-
-(define (define-variable-pairs! pair env)
-  (let ((frame (first-frame env)))
-    (define (scan pairs)
-      (cond 
-	((null? pairs)  (add-binding-to-frame! (cons var val) frame))
-	((eq? (variable pair) (first-variable pairs)) (set-car! (car pairs) (value pair)))
-	(else (scan (cdr pairs)))))
-    (scan frame)))
-
-(define (traverse-env-pairs env pair null-action eq-action error-action)
-  (define (scan pairs frame)
-    (cond 
-      ((null? vars) (null-action pair frame env))
-      ((eq? (variable pair) (first-variable pairs)) (eq-action pairs pair))
-      (else (scan (cdr pairs) frame))))
-  (if (eq? env the-empty-environment)
-    (error-action (variable pair))
-    (scan (first-frame env) (first-frame env))))
-
-(define (unbind-pairs var env)
-    (define (env-loop env)
-      (define (scan pairs)
-	(cond 
-	  ((null? pairs) (env-loop (enclosing-environment env)))
-	  ((eq? var (first-variable pairs)) (set! pairs (cdr pairs)))
-	  (else (scan (cdr pairs)))))
-      (if (eq? env the-empty-environment)
-	(error "Unbound variable -- UNBIND!" var)
-	  (scan (first-frame env))))
-    (env-loop env))
-
-(define (primitive-implementation proc) (cadr proc))
+(define (do-init-triplets exp) (cadr exp))
+(define (do-init-vars exp) (map car (do-init-triplets exp)))
+(define (do-init-starters exp) (map cadr (do-init-triplets exp)))
+(define (do-init-steps exp) (map caddr (do-init-triplets exp)))
+(define (do-test exp) (cadddr exp))
+(define (do-test-condition exp) (car (do-test exp)))
+(define (do-test-end exp) (cdr (do-test exp)))
+(define (do-tests exp) (caddr exp))
+(define (do-commands exp) (cadddr exp))
 
 (define (pow x y)
   (define (mul current result)
@@ -659,25 +189,9 @@
       (add-to-cache! output display-cache-entrance)
       (user-print output)))
   (driver-loop))
-(define (prompt-for-input string)
-  (newline) (newline) (display string) (newline))
 
 (define (display-cache-entrance) ;(display cache) 
   (newline) (display "$") (display cache-size) (display " = "))
-
-(define (announce-output string)
-  (newline) (display string) (newline))
-
-(define (user-print object)
-  (cond 
-    ((compound-procedure? object) (if (and (pair? (procedure-body object)) (number? (car (procedure-body object))) (= 12 (car (procedure-body object))))
-				    (display (map cadr (cdar (procedure-environment object))))
-					       (display (list 'compound-procedure
-						 (procedure-parameters object)
-						 (procedure-body object)
-						 '<procedure-env>))))
-    ((thunk? object) (display (thunk-exp object)))
-    (else (display object))))
 
 
 (define primitive-procedures
@@ -716,30 +230,8 @@
     (list 'equal? equal?)	(list 'string-append string-append)
     ))
 
-(define (primitive-procedure-names) (map car primitive-procedures))
-
-(define (primitive-procedure-objects)
-   (map (lambda (proc) (list 'primitive (cadr proc)))
-	primitive-procedures))
-
-(define (setup-environment)
-  (let ((initial-env
-	  (extend-environment (primitive-procedure-names)
-			      (primitive-procedure-objects)
-			      the-empty-environment)))
-    (define-variable! 'true true initial-env)
-    (define-variable! 'false false initial-env)
-    initial-env))
 
 (define the-global-environment (setup-environment))
-
-(define (apply-primitive-procedure proc args)
-  (apply-in-underlying-scheme
-    (primitive-implementation proc) args))
-
-(define (apply-in-underlying-scheme proc args) (apply proc args))
-
-
 
 (define (halts? p a)
   (if (p a) #t #f))
@@ -802,17 +294,13 @@
 (define (!= a b) (not (eq? a b)))
 
 (define test-body '( (define x 6) (define y (* x 2)) (define z cons) (z x y) ) )
-(define (delay-expression exp-m) (cdr exp-m))
-(define (cache-index exp-m) (- (cadr exp-m) 1))
-(define (exp-values exp-m) (cdr exp-m))
+(define (delay-expression exp) (cdr exp))
+(define (cache-index exp) (- (cadr exp) 1))
+(define (exp-values exp) (cdr exp))
 (define (add-to-cache! input success) (if (not (unspecified? input) ) (begin (set! cache (append cache (list input))) (set! cache-size (+ 1 cache-size)) (success))))
 
-(eval-m '(define (map1 p l) (display l) (newline)  (if (null? l) '() (cons (p (car l)) (map1 p (cdr l))))) 
-	the-global-environment)
-(eval-m '(define (map2 p l1 l2) (if (null? l1) '() (cons (p (car l1) (car l2)) (map2 p (cdr l1) (cdr l2))))) 
-	the-global-environment)
-
-
+;(eval-m '(define (map1 p l) (display l) (newline)  (if (null? l) '() (cons (p (car l)) (map1 p (cdr l))))) the-global-environment)
+;(eval-m '(define (map2 p l1 l2) (if (null? l1) '() (cons (p (car l1) (car l2)) (map2 p (cdr l1) (cdr l2))))) the-global-environment)
 (define test-body-eva '((define a 1) (define b (+ a x)) (+ a b)) )
 
 (define (apply-no-extra-frame-m procedure arguments)
@@ -836,11 +324,11 @@
 							 (procedure-environment procedure))))
     (else (error "Unknown procedure type -- APPLY" procedure))))
 
-(define (letrec->let exp-m)
-  (let* ((defines (let-pairs exp-m))
+(define (letrec->let exp)
+  (let* ((defines (let-pairs exp))
 	 (names (map let-parameter defines))
 	 (sets (map (lambda (pair) (make-set (let-parameter pair) (let-expression pair))) defines)))
-  (make-let names (append sets (let-body exp-m)))))
+  (make-let names (append sets (let-body exp)))))
 
 (define factorial-Y (lambda (n)
 		       ((lambda (fact) (fact fact n))
@@ -857,52 +345,52 @@
    (lambda (ev? od? n) (if (= n 0) true (od? ev? od? (- n 1))))
    (lambda (ev? od? n) (if (= n 0) false (ev? od? ev? (- n 1))))))
 
-(define (eval-analyze exp-m env) ((analyze exp-m) env))
+(define (eval-analyze exp env) ((analyze exp) env))
 
-(define (analyze exp-m)
+(define (analyze exp)
   (cond 
-    ((self-evaluating? exp-m) (analyze-self-evaluating exp-m))
-    ((quoted? exp-m) (analyze-quoted exp-m))
-    ((variable? exp-m) (analyze-variable exp-m))
-    ((assignment? exp-m) (analyze-assignment exp-m))
-    ((definition? exp-m) (analyze-definition exp-m))
-    ((let? exp-m) (analyze-application (let->combination exp-m)))
-    ((if? exp-m) (analyze-if exp-m))
-    ((lambda? exp-m) (analyze-lambda exp-m))
-    ((begin? exp-m) (analyze-sequence (begin-actions exp-m)))
-    ((cond? exp-m) (analyze (cond->if exp-m)))
-    ((application? exp-m) (analyze-application exp-m))
-    (else (error "Unknown expression type -- ANALYZE" exp-m))))
+    ((self-evaluating? exp) (analyze-self-evaluating exp))
+    ((quoted? exp) (analyze-quoted exp))
+    ((variable? exp) (analyze-variable exp))
+    ((assignment? exp) (analyze-assignment exp))
+    ((definition? exp) (analyze-definition exp))
+    ((let? exp) (analyze-application (let->combination exp)))
+    ((if? exp) (analyze-if exp))
+    ((lambda? exp) (analyze-lambda exp))
+    ((begin? exp) (analyze-sequence (begin-actions exp)))
+    ((cond? exp) (analyze (cond->if exp)))
+    ((application? exp) (analyze-application exp))
+    (else (error "Unknown expression type -- ANALYZE" exp))))
 
-(define (analyze-self-evaluating exp-m) (lambda (env) exp-m))
-(define (analyze-quoted exp-m) (let ((qval (text-of-quotation exp-m))) (lambda (env) qval)))
-(define (analyze-variable exp-m) (lambda (env) (lookup-variable-value exp-m env)))
-(define (analyze-assignment exp-m) 
-  (let ((var (assignment-variable exp-m))
-	(vproc (analyze (assignment-value exp-m))))
+(define (analyze-self-evaluating exp) (lambda (env) exp))
+(define (analyze-quoted exp) (let ((qval (text-of-quotation exp))) (lambda (env) qval)))
+(define (analyze-variable exp) (lambda (env) (lookup-variable-value exp env)))
+(define (analyze-assignment exp) 
+  (let ((var (assignment-variable exp))
+	(vproc (analyze (assignment-value exp))))
     (lambda (env)
       (set-variable-value! var (vproc env) env)
       'ok)))
 
-(define (analyze-definition exp-m)
-  (let ((var (definition-variable exp-m))
-	(vproc (analyze (definition-value exp-m))))
+(define (analyze-definition exp)
+  (let ((var (definition-variable exp))
+	(vproc (analyze (definition-value exp))))
     (lambda (env)
       (define-variable! var (vproc env) env)
       'ok)))
 
-(define (analyze-if exp-m)
-  (let ((pproc (analyze (if-predicate exp-m)))
-	(cproc (analyze (if-consequent exp-m)))
-	(aproc (analyze (if-alternative exp-m))))
+(define (analyze-if exp)
+  (let ((pproc (analyze (if-predicate exp)))
+	(cproc (analyze (if-consequent exp)))
+	(aproc (analyze (if-alternative exp))))
     (lambda (env)
       (if (true? (pproc env))
 	(cproc env)
 	(aproc env)))))
 
-(define (analyze-lambda exp-m)
-  (let ((vars (lambda-parameters exp-m))
-	(bproc (analyze-sequence (lambda-body exp-m))))
+(define (analyze-lambda exp)
+  (let ((vars (lambda-parameters exp))
+	(bproc (analyze-sequence (lambda-body exp))))
     (lambda (env) (make-procedure vars bproc env))))
 
 (define (analyze-sequence exps)
@@ -929,9 +417,9 @@
     (lambda (env) (execute-sequence procs env))))
 
 
-(define (analyze-application exp-m)
-  (let ((fproc (analyze (operator exp-m)))
-	(aprocs (map analyze (operands exp-m))))
+(define (analyze-application exp)
+  (let ((fproc (analyze (operator exp)))
+	(aprocs (map analyze (operands exp))))
     (lambda (env) 
       (execute-application (fproc env)
 			   (map (lambda (aproc) (aproc env))
@@ -951,7 +439,7 @@
       (user-print output)))
   (driver-loop-analyze ))
 
-;(define (unless condition usual-value exceptional-value) (if condition exceptional-value usual-value))
+
 (define-syntax unless
   (syntax-rules ()
 		((_ condition exceptional-value usual-value) (if (not condition) exceptional-value usual-value))))
@@ -985,55 +473,55 @@
 	       result)
 	result))))
 
-(define (list->cons exp-m)
-  (if (null? exp-m) ''() (list 'cons (first-exp-m  exp-m) (list->cons (rest-exp-ms exp-m)))))
+(define (list->cons exp)
+  (if (null? exp) ''() (list 'cons (first-exp  exp) (list->cons (rest-exps exp)))))
 
-(define (eval-m-lazy exp-m env)
+(define (eval-m-lazy exp env)
   (cond 
-    ((self-evaluating? exp-m) exp-m)
-    ((variable? exp-m) (lookup-variable-value exp-m env))
-    ((quoted? exp-m) (text-of-quotation-special exp-m env))
-    ((cached? exp-m) (list-ref cache (cache-index exp-m))) 
-    ((assignment? exp-m) (eval-m-assignment exp-m env))
-    ((definition? exp-m) (eval-m-definition-lazy exp-m env))
-    ((values? exp-m) (list-of-arg-values (exp-values exp-m) env))
-    ((if? exp-m) (eval-if-lazy exp-m env))
-    ((and? exp-m) (eval-m-and exp-m env))
-    ((or? exp-m) (eval-m-or exp-m env))
-    ((let? exp-m) (eval-m-lazy (let->combination exp-m) env))
-    ((lambda? exp-m)
-     (make-procedure (lambda-parameters exp-m)
-		     (lambda-body exp-m)
+    ((self-evaluating? exp) exp)
+    ((variable? exp) (lookup-variable-value exp env))
+    ((quoted? exp) (text-of-quotation-special exp env))
+    ((cached? exp) (list-ref cache (cache-index exp))) 
+    ((assignment? exp) (eval-m-assignment exp env))
+    ((definition? exp) (eval-m-definition-lazy exp env))
+    ((values? exp) (list-of-arg-values (exp-values exp) env))
+    ((if? exp) (eval-if-lazy exp env))
+    ((and? exp) (eval-m-and exp env))
+    ((or? exp) (eval-m-or exp env))
+    ((let? exp) (eval-m-lazy (let->combination exp) env))
+    ((lambda? exp)
+     (make-procedure (lambda-parameters exp)
+		     (lambda-body exp)
 		     env))
-    ((begin? exp-m) (eval-m-sequence-lazy (begin-actions exp-m) env))
-    ;((begin? exp-m) (eval-sequence-cy (begin-actions exp-m) env))
-    ((cond? exp-m) (eval-m-lazy (cond->if exp-m) env))
-    ((unbind? exp-m) (unbind (unbind-variable exp-m) env))
-    ((list-lazy? exp-m) (eval-m-lazy (list->cons (rest-exp-ms exp-m)) env))
-    ((let*? exp-m) (eval-m-lazy (let*->nested exp-m) env))
-    ((letrec? exp-m)(eval-m-lazy (letrec->let exp-m) env))
-    ((force? exp-m) (eval-m-lazy (delay-expression exp-m) env))
-    ((env? exp-m) env)
-    ((unless? exp-m) (eval-m-lazy (unless->if exp-m) env))
-    ((application? exp-m)
-     (apply-m-lazy (actual-value (operator exp-m) env)
-		   (operands exp-m)
+    ((begin? exp) (eval-m-sequence-lazy (begin-actions exp) env))
+    ;((begin? exp) (eval-sequence-cy (begin-actions exp) env))
+    ((cond? exp) (eval-m-lazy (cond->if exp) env))
+    ((unbind? exp) (unbind (unbind-variable exp) env))
+    ((list-lazy? exp) (eval-m-lazy (list->cons (rest-exps exp)) env))
+    ((let*? exp) (eval-m-lazy (let*->nested exp) env))
+    ((letrec? exp)(eval-m-lazy (letrec->let exp) env))
+    ((force? exp) (eval-m-lazy (delay-expression exp) env))
+    ((env? exp) env)
+    ((unless? exp) (eval-m-lazy (unless->if exp) env))
+    ((application? exp)
+     (apply-m-lazy (actual-value (operator exp) env)
+		   (operands exp)
 		   env))
-    (else (error "Unknown exp-mression type -- EVAL" exp-m))))
+    (else (error "Unknown expression type -- EVAL" exp))))
 
-(define (eval-m-sequence-lazy exp-ms env)
+(define (eval-m-sequence-lazy exps env)
   (cond 
-    ((last-exp-m? exp-ms) (eval-m-lazy (first-exp-m exp-ms) env))
-    (else (eval-m-lazy (first-exp-m exp-ms) env)
-	  (eval-m-sequence-lazy (rest-exp-ms exp-ms) env))))
+    ((last-exp? exps) (eval-m-lazy (first-exp exps) env))
+    (else (eval-m-lazy (first-exp exps) env)
+	  (eval-m-sequence-lazy (rest-exps exps) env))))
 
 (define (eval-sequence-cy exps env)
   (cond 
-    ((last-exp-m? exps) (eval-m-lazy (first-exp-m exps) env))
-    (else (actual-value (first-exp-m exps) env)
-	  (eval-sequence-cy (rest-exp-ms exps) env))))
+    ((last-exp? exps) (eval-m-lazy (first-exp exps) env))
+    (else (actual-value (first-exp exps) env)
+	  (eval-sequence-cy (rest-exps exps) env))))
 
-(define (actual-value exp-m env) (force-it (eval-m-lazy exp-m env)))
+(define (actual-value exp env) (force-it (eval-m-lazy exp env)))
 
 (define (apply-m-lazy procedure arguments env)
   (cond ((primitive-procedure? procedure)
@@ -1059,18 +547,18 @@
 	  (list-of-delayed-args (rest-operands exps)
 				env))))
 
-(define (eval-m-definition-lazy exp-m env)
-  (define-variable! (definition-variable exp-m)
-		    (eval-m-lazy (definition-value exp-m) env)
+(define (eval-m-definition-lazy exp env)
+  (define-variable! (definition-variable exp)
+		    (eval-m-lazy (definition-value exp) env)
 		    env)
   'ok)
 
 
-(define (eval-if-lazy exp-m env)
+(define (eval-if-lazy exp env)
   (if 
-    (true? (actual-value (if-predicate exp-m) env))
-    (eval-m-lazy (if-consequent exp-m) env)
-    (eval-m-lazy (if-alternative exp-m) env)))
+    (true? (actual-value (if-predicate exp) env))
+    (eval-m-lazy (if-consequent exp) env)
+    (eval-m-lazy (if-alternative exp) env)))
 
 (define input-prompt-lazy ";;; L-Eval input:")
 (define output-prompt-lazy ";;; L-Eval value:")
@@ -1116,8 +604,7 @@
     (else obj)))
 
 
-(eval-m-lazy '(define (p1 x) (set! x (cons x '(2))) x) the-global-environment)
-(eval-m-lazy '(define (p2 x) (define (p e) e x) (p (set! x (cons x '(2))))) the-global-environment)
+
 
 (define (apply-m-speical procedure arguments env)
   (cond ((primitive-procedure? procedure)
@@ -1130,8 +617,8 @@
 			  (procedure-environment procedure))))
 	(else (error "Unknown procedure type -- APPLY" procedure))))
 
-(define (lazy? exp-m) (eq? 'lazy (cadr exp-m)))
-(define (memoized? exp-m) (eq? 'memoized (cadr exp-m)))
+(define (lazy? exp) (eq? 'lazy (cadr exp)))
+(define (memoized? exp) (eq? 'memoized (cadr exp)))
 (define (list-of-values-speicialised parameters arguments env)
   (map (lambda (parameter argument)
 	 (cond
@@ -1139,59 +626,59 @@
 	   ((lazy? parameter) (delay-it-pure argument env))
 	   ((memoized? parameters) (delay-it-memo arguements env)))) parameters arguments))
 
-(define (amb-choices exp-m) (cdr exp-m))
+(define (amb-choices exp) (cdr exp))
 
-(define (ambeval exp-m env succeed fail) ((amb-analyze exp-m) env succeed fail))
+(define (ambeval exp env succeed fail) ((amb-analyze exp) env succeed fail))
 
 (define (require-predicate exp) (cadr exp))
 
-(define (amb-analyze exp-m)
+(define (amb-analyze exp)
   (cond
-    ((amb? exp-m) (amb-analyze-amb exp-m))
-    ((ramb? exp-m) (amb-analyze-ramb exp-m))
-    ((require? exp-m) (amb-analyze-require exp-m))
-    ((self-evaluating? exp-m) (amb-analyze-self-evaluating exp-m))
-    ((quoted? exp-m) (amb-analyze-quoted exp-m))
-    ((variable? exp-m) (amb-analyze-variable exp-m))
-    ((assignment? exp-m) (amb-analyze-assignment exp-m))
-    ((permanent-assignment? exp-m) (amb-analyze-permanent-assignment exp-m))
-    ((definition? exp-m)  (amb-analyze-definition exp-m))
-    ((let? exp-m) (amb-analyze-application (let->combination exp-m)))
-    ((if? exp-m) (amb-analyze-if exp-m))
-    ((if-fail? exp-m) (amb-analyze-if-fail exp-m))
-    ((lambda? exp-m) (amb-analyze-lambda exp-m))
-    ((and? exp-m) (amb-analyze (and->if exp-m '())))
-    ((or? exp-m) (amb-analyze (or->if exp-m '())))
-    ((begin? exp-m) (amb-analyze-sequence (begin-actions exp-m)))
-    ((cond? exp-m) (amb-analyze (cond->if exp-m)))
-    ((application? exp-m) (amb-analyze-application exp-m))
-    (else (error "Unknown expression type -- ANALYZE" exp-m))))
+    ((amb? exp) (amb-analyze-amb exp))
+    ((ramb? exp) (amb-analyze-ramb exp))
+    ((require? exp) (amb-analyze-require exp))
+    ((self-evaluating? exp) (amb-analyze-self-evaluating exp))
+    ((quoted? exp) (amb-analyze-quoted exp))
+    ((variable? exp) (amb-analyze-variable exp))
+    ((assignment? exp) (amb-analyze-assignment exp))
+    ((permanent-assignment? exp) (amb-analyze-permanent-assignment exp))
+    ((definition? exp)  (amb-analyze-definition exp))
+    ((let? exp) (amb-analyze-application (let->combination exp)))
+    ((if? exp) (amb-analyze-if exp))
+    ((if-fail? exp) (amb-analyze-if-fail exp))
+    ((lambda? exp) (amb-analyze-lambda exp))
+    ((and? exp) (amb-analyze (and->if exp '())))
+    ((or? exp) (amb-analyze (or->if exp '())))
+    ((begin? exp) (amb-analyze-sequence (begin-actions exp)))
+    ((cond? exp) (amb-analyze (cond->if exp)))
+    ((application? exp) (amb-analyze-application exp))
+    (else (error "Unknown expression type -- ANALYZE" exp))))
 
-(define (amb-analyze-self-evaluating exp-m)
+(define (amb-analyze-self-evaluating exp)
   (lambda (env succeed fail)
-    (succeed exp-m fail)))
+    (succeed exp fail)))
 
-(define (amb-analyze-quoted exp-m)
-  (let ((qval (text-of-quotation exp-m)))
+(define (amb-analyze-quoted exp)
+  (let ((qval (text-of-quotation exp)))
     (lambda (env succeed fail) (succeed qval fail))))
 
-(define (amb-analyze-variable exp-m)
+(define (amb-analyze-variable exp)
   (lambda (env succeed fail)
-    (succeed (lookup-variable-value exp-m env)
+    (succeed (lookup-variable-value exp env)
 	     fail)))
 
-(define (amb-analyze-lambda exp-m)
-  (let ((vars (lambda-parameters exp-m))
-	(bproc (amb-analyze-sequence (lambda-body exp-m))))
+(define (amb-analyze-lambda exp)
+  (let ((vars (lambda-parameters exp))
+	(bproc (amb-analyze-sequence (lambda-body exp))))
     (lambda (env succeed fail)
       (succeed (make-procedure vars bproc env) fail))))
 
 
-(define (amb-analyze-if exp-m)
+(define (amb-analyze-if exp)
   (let 
-    ((pproc (amb-analyze (if-predicate exp-m)))
-     (cproc (amb-analyze (if-consequent exp-m)))
-     (aproc (amb-analyze (if-alternative exp-m))))
+    ((pproc (amb-analyze (if-predicate exp)))
+     (cproc (amb-analyze (if-consequent exp)))
+     (aproc (amb-analyze (if-alternative exp))))
     (lambda (env succeed fail)
       (pproc env
 	     ;; success continuation for evaluating the predicate
@@ -1203,10 +690,10 @@
 	     ;; failure continuation for evaluating the predicate
 	     fail))))
 
-(define (amb-analyze-if-fail exp-m)
+(define (amb-analyze-if-fail exp)
   (let 
-    ((first (amb-analyze (cadr exp-m)))
-     (second (amb-analyze (caddr exp-m))))
+    ((first (amb-analyze (cadr exp)))
+     (second (amb-analyze (caddr exp))))
     (lambda (env succeed fail)
       (first env
 	     (lambda (value fail2) value)
@@ -1232,11 +719,11 @@
       (error "Empty sequence -- ANALYZE"))
     (loop (car procs) (cdr procs))))
 
-;(define (for-each proc items) (if (null? items) 'done (begin (proc (car items)) (for-each proc (cdr items))))) 
+(define (for-each proc items) (if (null? items) 'done (begin (proc (car items)) (for-each proc (cdr items))))) 
 
-(define (amb-analyze-definition exp-m)
-  (let ((var (definition-variable exp-m))
-	(vproc (amb-analyze (definition-value exp-m))))
+(define (amb-analyze-definition exp)
+  (let ((var (definition-variable exp))
+	(vproc (amb-analyze (definition-value exp))))
     (lambda (env succeed fail)
       (vproc env
 	     (lambda (val fail2)
@@ -1245,9 +732,9 @@
 	     fail))))
 
 
-(define (amb-analyze-assignment exp-m)
-  (let ((var (assignment-variable exp-m))
-	(vproc (amb-analyze (assignment-value exp-m))))
+(define (amb-analyze-assignment exp)
+  (let ((var (assignment-variable exp))
+	(vproc (amb-analyze (assignment-value exp))))
     (lambda (env succeed fail)
       (vproc env
 	     (lambda (val fail2) ; *1*
@@ -1259,9 +746,9 @@
 			    (fail2)))))
 	     fail))))
 
-(define (amb-analyze-permanent-assignment exp-m)
-  (let ((var (assignment-variable exp-m))
-	(vproc (amb-analyze (assignment-value exp-m))))
+(define (amb-analyze-permanent-assignment exp)
+  (let ((var (assignment-variable exp))
+	(vproc (amb-analyze (assignment-value exp))))
     (lambda (env succeed fail)
       (vproc env
 	     (lambda (val fail2) ; *1*
@@ -1269,10 +756,10 @@
 		 (succeed 'ok  (lambda () (fail2))))
 	     fail))))
 
-(define (amb-analyze-application exp-m)
+(define (amb-analyze-application exp)
   (let 
-    ((fproc (amb-analyze (operator exp-m)))
-     (aprocs (map amb-analyze (operands exp-m))))
+    ((fproc (amb-analyze (operator exp)))
+     (aprocs (map amb-analyze (operands exp))))
     (lambda (env succeed fail)
       (fproc env
 	     (lambda (proc fail2)
@@ -1312,8 +799,8 @@
 	  fail))
 	(else (error "Unknown procedure type -- AMB-EXECUTE-APPLICATION" proc))))
 
-(define (amb-analyze-amb exp-m)
-  (let ((cprocs (map amb-analyze (amb-choices exp-m))))
+(define (amb-analyze-amb exp)
+  (let ((cprocs (map amb-analyze (amb-choices exp))))
     (lambda (env succeed fail)
       (define (try-next choices)
 	(if (null? choices) (fail)
@@ -1322,8 +809,8 @@
 			 (lambda () (try-next (cdr choices))))))
       (try-next cprocs))))
 
-(define (amb-analyze-ramb exp-m)
-  (let ((cprocs (map amb-analyze (amb-choices exp-m))))
+(define (amb-analyze-ramb exp)
+  (let ((cprocs (map amb-analyze (amb-choices exp))))
     (lambda (env succeed fail)
       (define (try-next choices)
 	(if (null? choices) (fail)
@@ -1403,8 +890,7 @@
 		(filter (lambda (baker) (not (= baker smith))) (list 1 2 3 4)))) 
        (list 1 2 3 4 5)))
 
-(amb-import "interpret.scm")
-(amb-import "AmbQuery.scm")
+
 
 (define query-input-prompt ";;; Query input:")
 (define query-output-prompt ";;; Query results:")
@@ -1768,8 +1254,7 @@
 
 (put 'unique 'qeval uniquely-asserted)
 
-(define (simple-stream-flatmap proc s)
-(simple-flatten (stream-map proc s)))
+(define (simple-stream-flatmap proc s) (simple-flatten (stream-map proc s)))
 (define (simple-flatten stream)
 (stream-map (lambda (frame) (if (singleton-stream? frame) (car frame) frame))
 	    (stream-filter (lambda (frame) (not (stream-null? x)))  stream)))
@@ -1790,6 +1275,8 @@
   (close-input-port port))
 
 (query-import "Microshaft.scm")
+;(amb-import "interpret.scm")
+;(amb-import "AmbQuery.scm")
 
 (use-modules (ice-9 r5rs))
 (define user-initial-environment (scheme-report-environment 5))

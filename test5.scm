@@ -26,9 +26,9 @@
     (newline))
     (define (dispatch message)
       (cond ((eq? message 'get) contents)
-	    ((eq? message 'trace-on!) (lambda () (set! traced true) 'trace-on))
+	    ((eq? message 'trace-on!) (set! traced true) 'trace-on)
 	    ((eq? message 'traced) traced)
-	    ((eq? message 'trace-off!) (lambda () (set! traced false) 'trace-off))	
+	    ((eq? message 'trace-off!) (set! traced false) 'trace-off)
 	    ((eq? message 'set) (lambda (value) (if traced (display-info value)) (set! contents value)))
 	    (else (error "Unknown request -- REGISTER" message))))
     dispatch))
@@ -59,7 +59,7 @@
       (set! max-depth 0)
       (set! current-depth 0)
       'done)
-    (define (print-statistics)
+    (define (print-stack-statistics)
       (newline)
       (display (list 'total-pushes '= number-pushes
 		     'maximum-depth '= max-depth)) (newline) )
@@ -68,7 +68,7 @@
 	((eq? message 'push) push)
 	((eq? message 'pop) (pop))
 	((eq? message 'initialize) (initialize))
-	((eq? message 'print-statistics) (print-statistics))
+	((eq? message 'print-stack-statistics) (print-stack-statistics))
 	(else (error "Unknown request -- STACK" message))))
     dispatch))
 
@@ -136,20 +136,21 @@
 ((stack 'push) variable value))
 (define (initialize stack) (stack 'initialize))
 
-(define (make-new-machine) ;; HERE!!!
-  (let ((pc (make-register 'pc))
-	(flag (make-register 'flag))
-	(stack (make-stack))
-	(the-instruction-sequence '())
-	(used-instructions '())
-	(entry-points '())
-	(stacked '())
-	(assignments '())
-	(instruction-counter 0)
-	(instruction-count 0)
-	(trace false)
-	(labels '())
-	(breakpoints '())
+(define (make-new-machine)
+  (let (
+		(pc (make-register 'pc))
+		(flag (make-register 'flag))
+		(stack (make-stack))
+		(the-instruction-sequence '())
+		(used-instructions '())
+		(entry-points '())
+		(stacked '())
+		(assignments '())
+		(instruction-counter 0)
+		(instruction-count 0)
+		(trace false)
+		(labels '())
+		(breakpoints '())
 	)
     (let ((the-ops (list (list 'initialize-stack (lambda () (stack 'initialize)))))
 	  (register-table (list (list 'pc pc) (list 'flag flag))))
@@ -184,7 +185,7 @@
       (define (set-breakpoint! label n)
 	(let ((pair (assoc-cdr label labels)))
 	  (if pair
-	    (begin (set! breakpoints (add-sorted-set (cons (+ (car pair) n) (cons (cdr pair) n)) (lambda (element) (car element)) breakpoints)) dispatch)
+	    (begin (set! breakpoints (add-sorted-set (cons (+ (car pair) n) (cons (cdr pair) n)) (lambda (element) (car element)) breakpoints)) "breakpoint set")
 	    (error "Unknown label -- Set-Breakpoint" label))))
 
 
@@ -199,7 +200,7 @@
       (define (cancel-all-breakpoints) (set! breakpoints '()) dispatch)
       
       (define (display-line insts)
-	(let ((label (assoc (modulo instruction-counter instruction-count) labels)))
+	(let ((label (assoc (- (instruction-number (car insts)) 1) labels)))
 	  (if label (begin (display (cdr label)) (newline))))
 	(display (list instruction-counter ":" (instruction-text (car insts))))	 (newline))
 
@@ -252,8 +253,8 @@
 	  ((eq? message 'add-assignment!) add-assignment!)
 	  ((eq? message 'add-label-trace!) add-label-trace!)
 	  ((eq? message 'labels) labels)
-	  ((eq? message 'trace-on!) trace-on!)
-	  ((eq? message 'trace-off!) trace-off!)
+	  ((eq? message 'trace-on!) (trace-on!))
+	  ((eq? message 'trace-off!) (trace-off!))
 	  ((eq? message 'register-trace-on!) (lambda (name) (get-trace-setting name 'trace-on!)))
 	  ((eq? message 'register-trace-off!) (lambda (name) (get-trace-setting name 'trace-off!)))
 	  ((eq? message 'assignments) assignments)
@@ -266,6 +267,7 @@
 	  ((eq? message 'cancel-all-breakpoints) cancel-all-breakpoints)
 	  ((eq? message 'used-instructions) used-instructions)
 	  ((eq? message 'instruction-sequence) the-instruction-sequence)
+		((eq? message 'print-stack-statistics) (stack 'print-stack-statistics))
 	  (else (error "Unknown request -- MACHINE" message))))
 dispatch)))
 
@@ -277,6 +279,7 @@ dispatch)))
 
 (define (start machine) (machine 'start))
 (define (proceed machine) (machine 'proceed))
+(define (print-stack-statistics machine) (machine 'print-stack-statistics))
 (define (get-register-contents machine register-name)
   (get-contents (get-register machine register-name)))
 (define (set-register-contents! machine register-name value)
@@ -314,9 +317,9 @@ dispatch)))
 		      (let ((next-inst (car text)))
 			(if (symbol? next-inst)
 			  (begin (add-label-trace! machine next-inst counter) (receive insts (update-labels-if-possible (make-label-entry next-inst insts) labels)))
-			  (receive (cons (make-instruction next-inst)
+			  (receive (cons (make-instruction next-inst counter)
 					 insts)
-				   labels)))) machine (+ 1 counter) )))
+				   labels)))) machine (+ 1 counter))))
 
 (define instruction-set '(assign branch goto perform restore save test))
 
@@ -325,17 +328,18 @@ dispatch)))
     (error "ALREADY DEFINED LABEL -- ASSEMBLE" (car label-entry))
     (cons label-entry labels)))
 
-(define (make-instruction text)
-  (cons text '()))
+(define (make-instruction text counter)
+  (list text counter))
 (define (instruction-text inst)
   (car inst))
+(define (instruction-number inst)
+	(cadr inst))
 (define (instruction-execution-proc inst)
-  (cdr inst))
+  (cddr inst))
 (define (set-instruction-execution-proc! inst proc)
-  (set-cdr! inst proc))
+  (set-cdr! (cdr inst) proc))
 
-(define (make-label-entry label-name insts)
-(cons label-name insts))
+(define (make-label-entry label-name insts) (cons label-name insts))
 
 (define (lookup-label labels label-name)
   (let ((val (assoc label-name labels)))
@@ -526,6 +530,11 @@ dispatch)))
 (define (operation-exp-op operation-exp) (cadr (car operation-exp)))
 (define (operation-exp-operands operation-exp) (cdr operation-exp))
 
+(define (contains? l e) 
+	(cond 
+		((null? l) false)
+		((eq? (car l) e) true)
+		(else (contains? (cdr l) e))))
 (define (lookup-prim symbol operations)
   (let ((val (assoc symbol operations)))
     (if val
@@ -536,11 +545,16 @@ dispatch)))
   (if (null? l) false
     (or (pred (car l)) (any? pred (cdr l)))))
 
+(define (all? pred l)
+	(if (null? l) true) 
+		(and (pred (car l)) (all?? pred (cdr l))))
+
 (define (gcd-machine)
   (make-machine	(list (list 'rem remainder) (list '= =))
 		'( (assign a (const 16932))
 		   (assign b (const 1002))
-		  test-b (test (op =) (reg b) (const 0))
+		   test-b 
+		   (test (op =) (reg b) (const 0))
 			 (branch (label gcd-done))
 			 (assign t (op rem) (reg a) (reg b))
 			 (assign a (reg b))
@@ -584,15 +598,17 @@ dispatch)))
 		   )))
 
 (define (count-leaves-machine)
-  (make-machine (list (list 'null? null?) (list 'pair? pair?) (list '+ +))
+  (make-machine (list (list 'null? null?) (list 'pair? pair?) (list '+ +) (list 'car car) (list 'cdr cdr)  (list 'print (lambda (x) (display x) (newline))) )
 		'(controller
-		   (assign continue (label cond-test))
+		   (assign val (const 0))
+		   (assign continue (label end))
+		   
 		   cond-test
 		   (test (op null?) (reg tree))
 		   (branch (label is-null))
 		   (test (op pair?) (reg tree))
 		   (branch (label is-pair))
-		   (assign val 1)
+		   (assign val (const 1))
 		   (goto (reg continue))
 
 		   is-pair
@@ -608,7 +624,9 @@ dispatch)))
 		   (save tree)
 		   (assign tree (op cdr) (reg tree))
 		   (save val)
-		   (save continue
+		   (save continue)
+		   (assign continue (label counted-cdr))
+		   (goto (label cond-test))
 
 		   counted-cdr
 		   (restore continue)
@@ -620,6 +638,99 @@ dispatch)))
 		   is-null
 		   (assign val (const 0))
 		   (goto (reg continue))
+		   end	   
+		   )))
+
+(define (count-leaves-machine-iter)
+  (make-machine (list (list 'null? null?) (list 'pair? pair?) (list '+ +) (list 'car car) (list 'cdr cdr)  (list 'print (lambda (x) (display x) (newline))) )
+		'(controller
+		   (assign val (const 0))
+		   (assign continue (label end))
+		   cond-test
+		   (test (op null?) (reg tree))
+		   (branch (label is-null))
+
+		   (test (op pair?) (reg tree))
+		   (branch (label is-pair))
+		   (assign val (op +) (reg val) (const 1))
+		   (goto (reg continue))
+
+		   is-pair
+		   (save continue)
+		   (assign continue (label counted-car))
+		   (save tree)
+		   (assign tree (op car) (reg tree))
+		   (goto (label cond-test))
+		   
+		   counted-car
+		   (restore tree)
+		   (assign continue (label counted-cdr))
+		   (assign tree (op cdr) (reg tree))
+		   (goto (label cond-test))
+
+		   counted-cdr
+		   (restore continue)
+		   (goto (reg continue))
+
+		   is-null
+		   (goto (reg continue))
+		   end	   
+		   )))
+
+
+(define (append-machine)
+  (make-machine (list (list 'null? null?) (list 'pair? pair?) (list '+ +) (list 'car car) (list 'cdr cdr) (list 'cons cons)  (list 'print (lambda (x) (display x) (newline))) )
+		'(controller
+		   (assign continue (label end))
+		   
+		   test-cond
+		   (test (op null?) (reg a))
+		   (branch (label is-null))
+		   (assign c (op car) (reg a))
+		   (save c)
+		   (save continue)
+		   (assign continue (label got-cdr))
+		   (assign a (op cdr) (reg a))
+		   (goto (label test-cond))
+
+		   got-cdr
+		   (restore continue)
+		   (restore c)
+		   (assign value (op cons) (reg c) (reg value))
+		   (goto (reg continue))
+
+		   is-null
+		   (assign value (reg b))
+		   (goto (reg continue))
+		   end	   
+		   )))
+
+(define (append!-machine)
+  (make-machine (list (list 'null? null?) (list 'null-cdr? (lambda (x) (null? (cdr x)))) 
+		      (list 'pair? pair?) (list '+ +) (list 'car car) (list 'cdr cdr) (list 'cons cons) (list 'set-cdr! set-cdr!) (list 'print (lambda (x) (display x) (newline))) )
+		'(controller
+		   (assign continue (label end))
+		   
+		   test-cond
+		   (test (op null-cdr?) (reg a))
+		   (branch (label is-null))
+		   (save a)
+		   (save continue)
+		   (assign continue (label got-cdr))
+		   (assign a (op cdr) (reg a))
+		   (goto (label test-cond))
+
+		   got-cdr
+		   (restore continue)
+		   (restore a)
+		   (goto (reg continue))
+
+		   is-null
+		   (perform (op set-cdr!) (reg a) (reg b))
+		   (goto (reg continue))
+		   end	   
+		   )))
+
 
 (define (position-of element l)
   (define (work current index)
@@ -629,4 +740,406 @@ dispatch)))
       (else (work (cdr current) (+ 1 index)))))
   (work l 0))
 
-; (lambda (x y) (< (position-of x instruction-set) (position-of y instruction-set)))
+(define (append-x x y)
+  (if (null? x) y (cons x (append (cdr x) y))))
+
+
+(define mach (append!-machine))
+(set-register-contents! mach 'a '(2 4))
+(set-register-contents! mach 'b '(3 5))
+
+(define (adjoin-arg arg arglist) (append arglist (list arg)))
+
+
+(define (import file-name evaluator)
+  (define port (open-input-file file-name))
+  (define (work number) 
+   (let ((line (read port)))
+     (if (eof-object? line)
+          'done
+          (begin (evaluator line the-global-environment) ;(display number) (display "\t") (display line) (newline)  
+		 (work (+ 1 number))))))
+  (work 0) 
+  (close-input-port port))
+
+(define (pow x y) (if (= y 0) 1 (* x (pow x (- y 1)))))
+
+(define (get-global-environment) the-global-environment)
+(define (empty-arglist) '())
+
+(define primitive-procedures
+  (list 
+    (list '- -)								(list 'close-input-port close-input-port) 
+    (list '* *)								(list 'string-length string-length)
+    (list '+ +)		  					(list 'string->symbol string->symbol)
+    (list '< <)								(list 'list list)	
+		(list '/ /) 							(list 'pair? pair?)	
+		(list 'cdr cdr)						(list 'memq memq)	
+		(list 'cons cons)					(list 'open-input-file open-input-file)
+    (list '>= >=)						  (list 'symbol->string symbol->string)	
+    (list 'car car) 					(list 'eof-object? eof-object?)		
+    (list 'null? null?)				(list 'get-global-environment get-global-environment)
+    (list 'modulo modulo)			(list 'adjoin-arg adjoin-arg)
+    (list 'reverse reverse)		(list 'quit exit)			
+    (list 'pow pow) 					(list 'exit exit) 				
+    (list '= =)								(list 'import import)			
+    (list 'string? string?)		(list 'symbol? symbol?)		
+    (list 'error error)				(list 'newline newline)		
+    (list 'list-ref list-ref)	(list 'caadr caadr)				
+    (list 'filter filter)			(list 'length length)			
+    (list 'set-car! set-car!)	(list 'set-cdr! set-cdr!)	
+    (list 'even? even?)				(list 'member member)
+    (list 'abs abs)						(list 'user-inital-environment '())  
+    (list 'assoc assoc)				(list 'equal? equal?)	
+    (list 'string=? string=?) (list 'substring substring)
+    (list 'not not)						(list 'read read)					
+  	(list 'number? number?)		(list 'empty-arglist empty-arglist)	
+		(list 'display display)		(list 'last-operand? (lambda (ops) (null? (cdr ops))))
+    (list 'append append)			(list 'caddr caddr)		
+    (list 'cadr cadr)					(list 'cddr cddr)		
+    (list 'eq? eq?)						(list 'odd? odd?)		
+    (list '<= <=)							(list 'print-stack-statistics (lambda () (print-stack-statistics eceval)))
+    (list '> >)											
+    ))
+
+(define (get-function symbol) (primitive-eval symbol))
+
+(define (import-to-primitives file-name)
+  (define port (open-input-file file-name))
+  (define (work) 
+   (let ((line (read port)))
+     (if (eof-object? line)
+          'done
+					(begin
+						(display line) (newline)
+						(primitive-eval line)
+						(if (pair? (cadr line)) 
+						(let ((name (caadr line)))
+						(set! primitive-procedures (cons (list name (get-function name)) primitive-procedures)))) ;(display number) (display "\t") (display line) (newline)  
+									(work)))))
+  (display (work))
+  (close-input-port port))
+	
+(import-to-primitives "evaluator.base.scm")
+
+(define the-global-environment (setup-environment))
+(define eceval
+	  (make-machine primitive-procedures
+	      '(
+		read-eval-print-loop
+		(perform (op initialize-stack))
+		(perform (op prompt-for-input) (const ";;; EC-Eval input:"))
+		(assign exp (op read))
+		(assign env (op get-global-environment))
+		(assign continue (label print-result))
+		(goto (label eval-dispatch))
+		
+		
+		print-result
+		(perform (op print-stack-statistics))
+		(perform (op announce-output) (const ";;; EC-Eval value:"))
+		(perform (op user-print) (reg val))
+		(goto (label read-eval-print-loop))
+
+		eval-dispatch
+		(test (op self-evaluating?) (reg exp))
+		(branch (label ev-self-eval))
+		(test (op variable?) (reg exp))
+		(branch (label ev-variable))
+		(test (op quoted?) (reg exp))
+		(branch (label ev-quoted))
+		(test (op assignment?) (reg exp))
+		(branch (label ev-assignment))
+		(test (op definition?) (reg exp))
+		(branch (label ev-definition))
+		(test (op if?) (reg exp))
+		(branch (label ev-if))
+		(test (op lambda?) (reg exp))
+		(branch (label ev-lambda))
+		(test (op begin?) (reg exp))
+		(branch (label ev-begin))
+		(test (op and?) (reg exp))
+		(branch (label ev-and))
+		(test (op or?) (reg exp))
+		(branch (label ev-or))
+		(test (op cond?) (reg exp))
+		(branch (label ev-cond))
+		(test (op let?) (reg exp))
+		(branch (label ev-let))
+		(test (op application?) (reg exp))
+		(branch (label ev-application))
+		(goto (label unknown-expression-type))
+
+		ev-self-eval
+		(assign val (reg exp))
+		(goto (reg continue))
+
+		ev-variable
+		(assign val (op lookup-variable-value) (reg exp) (reg env))
+		(goto (reg continue))
+
+		ev-quoted
+		(assign val (op text-of-quotation) (reg exp))
+		(goto (reg continue))
+
+		ev-lambda
+		(assign unev (op lambda-parameters) (reg exp))
+		(assign exp (op lambda-body) (reg exp))
+		(assign val (op make-procedure) (reg unev) (reg exp) (reg env))
+		(goto (reg continue))
+
+		ev-application
+		(save continue)
+		(save env)
+		(assign unev (op operands) (reg exp))
+		(save unev)
+		(assign exp (op operator) (reg exp))
+		(assign continue (label ev-appl-did-operator))
+		(goto (label eval-dispatch))
+
+		ev-appl-did-operator
+		(restore unev) ; the operands
+		(restore env)
+		(assign argl (op empty-arglist))
+		(assign proc (reg val)) ; the operator
+		(test (op no-operands?) (reg unev))
+		(branch (label apply-dispatch))
+		(save proc)
+
+		ev-appl-operand-loop
+		(save argl)
+		(assign exp (op first-operand) (reg unev))
+		(test (op last-operand?) (reg unev))
+		(branch (label ev-appl-last-arg))
+		(save env)
+		(save unev)
+		(assign continue (label ev-appl-accumulate-arg))
+		(goto (label eval-dispatch))
+
+		ev-appl-accumulate-arg
+		(restore unev)
+		(restore env)
+		(restore argl)
+		(assign argl (op adjoin-arg) (reg val) (reg argl))
+		(assign unev (op rest-operands) (reg unev))
+		(goto (label ev-appl-operand-loop))
+
+		ev-appl-last-arg
+		(assign continue (label ev-appl-accum-last-arg))
+		(goto (label eval-dispatch))
+
+		ev-appl-accum-last-arg
+		(restore argl)
+		(assign argl (op adjoin-arg) (reg val) (reg argl))
+		(restore proc)
+		(goto (label apply-dispatch))
+
+		ev-appl-did-operator-lazy
+		(restore unev)
+		(restore env)
+		(assign argl (reg unev))
+		(assign proc (reg val))
+		(goto (label apply-dispatch))
+
+		apply-dispatch
+		(test (op primitive-procedure?) (reg proc))
+		(branch (label primitive-apply))
+		(test (op compound-procedure?) (reg proc))
+		(branch (label compound-apply))
+		(goto (label unknown-procedure-type))
+
+		primitive-apply
+		(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+		(restore continue)
+		(goto (reg continue))
+
+		compound-apply
+		(assign unev (op procedure-parameters) (reg proc))
+		(assign env (op procedure-environment) (reg proc))
+		(assign env (op extend-environment) (reg unev) (reg argl) (reg env))
+		(assign unev (op procedure-body) (reg proc))
+		(goto (label ev-sequence))
+
+		ev-begin
+		(assign unev (op begin-actions) (reg exp))
+		(save continue)
+		(goto (label ev-sequence))
+
+		ev-sequence
+		(assign exp (op first-exp) (reg unev))
+		(test (op last-exp?) (reg unev))
+		(branch (label ev-sequence-last-exp))
+		(save unev)
+		(save env)
+		(assign continue (label ev-sequence-continue))
+		(goto (label eval-dispatch))
+
+		ev-sequence-continue
+		(restore env)
+		(restore unev)
+		(assign unev (op rest-exps) (reg unev))
+		(goto (label ev-sequence))
+
+		ev-sequence-last-exp
+		(restore continue)
+		(goto (label eval-dispatch))
+
+		ev-if
+		(save exp) ; save expression for later
+		(save env)
+		(save continue)
+		(assign continue (label ev-if-decide))
+		(assign exp (op if-predicate) (reg exp))
+		(goto (label eval-dispatch)) ; evaluate the predicate
+
+		ev-if-decide
+		(restore continue)
+		(restore env)
+		(restore exp)
+		(test (op true?) (reg val))
+		(branch (label ev-if-consequent))
+
+		ev-if-alternative
+		(assign exp (op if-alternative) (reg exp))
+		(goto (label eval-dispatch))
+
+		ev-if-consequent
+		(assign exp (op if-consequent) (reg exp))
+		(goto (label eval-dispatch))
+
+		ev-assignment
+		(assign unev (op assignment-variable) (reg exp))
+		(save unev) ; save variable for later
+		(assign exp (op assignment-value) (reg exp))
+		(save env)
+		(save continue)
+		(assign continue (label ev-assignment-1))
+		(goto (label eval-dispatch)) ; evaluate the assignment value
+
+		ev-assignment-1
+		(restore continue)
+		(restore env)
+		(restore unev)
+		(perform (op set-variable-value!) (reg unev) (reg val) (reg env))
+		(assign val (const ok))
+		(goto (reg continue))
+
+		ev-definition
+		(assign unev (op definition-variable) (reg exp))
+		(save unev) ; save variable for later
+		(assign exp (op definition-value) (reg exp))
+		(save env)
+		(save continue)
+		(assign continue (label ev-definition-1))
+		(goto (label eval-dispatch)) ; evaluate the definition value
+
+		ev-definition-1
+		(restore continue)
+		(restore env)
+		(restore unev)
+		(perform (op define-variable!) (reg unev) (reg val) (reg env))
+		(assign val (const ok))
+		(goto (reg continue))
+
+		ev-and
+		(assign unev (op operands) (reg exp))
+		(save continue)
+		(save unev)
+		(assign exp (op first-operand) (reg unev))
+		(assign continue (label ev-and-loop))
+		(goto (label eval-dispatch))
+
+		ev-and-loop
+		(restore unev)
+		(test (op false?) (reg val))
+		(branch (label short-circuit))
+		(test (op null?) (reg unev))
+		(branch (label end-loop))
+		(assign unev (op rest-operands) (reg unev))
+		(save unev)
+		(assign exp (op first-operand) (reg unev))
+		(goto (label eval-dispatch))
+
+		ev-or
+		(assign unev (op operands) (reg exp))
+		(save continue)
+		(save unev)
+		(assign exp (op first-operand) (reg unev))
+		(assign continue (label ev-or-loop))
+		(goto (label eval-dispatch))
+
+		ev-or-loop
+		(restore unev)
+		(test (op true?) (reg val))
+		(branch (label short-circuit))
+		(test (op null?) (reg unev))
+		(branch (label end-loop))
+		(assign unev (op rest-operands) (reg unev))
+		(save unev)
+		(assign exp (op first-operand) (reg unev))
+		(goto (label eval-dispatch))
+
+		end-loop
+		short-circuit
+		(restore continue)
+		(goto (reg continue))
+
+		ev-cond
+		(assign unev (op operands) (reg exp))
+		(save continue)
+		(save unev)
+		(assign exp (op first-operand) (reg unev))
+		(assign exp (op cond-predicate) (reg exp))
+		(assign continue (label ev-pred))
+		(goto (label eval-dispatch))
+
+		ev-pred
+		(test (op true?) (reg val))
+		(branch (label pred-true))
+		(restore unev)
+		(assign unev (op rest-operands) (reg unev))
+		(save unev)
+		(assign exp (op first-operand) (reg unev))
+		(assign exp (op cond-predicate) (reg exp))
+		(goto (label eval-dispatch))
+
+		pred-true
+		(restore unev)
+		(assign exp (op first-operand) (reg unev))
+		(assign exp (op rest-operands) (reg exp))
+		(restore continue)
+		(goto (label eval-dispatch))
+
+		ev-let
+		(assign proc (op let-pairs) (reg exp))
+		(goto (label seperate-lists))
+
+		seperated-lists
+		(assign proc (op make-lambda) (reg argl) (reg proc))
+		(assign exp (op cons) (reg proc) (reg unev))
+		(goto (label eval-dispatch))
+
+		seperate-lists
+		(test (op null?) (reg proc))
+		(branch (label seperated-lists)) 
+		(assign val (op let-parameter) (reg proc))
+		(assign argl (op adjoin-arg) (reg val) (reg argl))
+		(assign val (op let-expression) (reg proc))
+		(assign unev (op adjoin-arg) (reg val) (reg unev))
+		(assign proc (op cdr) (reg proc))
+		(goto (label seperate-lists))
+
+		unknown-expression-type
+		(assign val (const 7))
+		(goto (label signal-error))
+
+		unknown-procedure-type
+		(restore continue) ; clean up stack (from apply-dispatch)
+		(assign val (const 8))
+		(goto (label signal-error))
+
+		signal-error
+		(assign val (op get-error-text) (reg val))
+		(perform (op user-print) (reg val))
+		(goto (label read-eval-print-loop))
+	      )))
