@@ -196,42 +196,54 @@
 				       (extend-environment (procedure-parameters procedure) arguments (procedure-environment procedure))))
 (else (error "Unknown procedure type -- APPLY" procedure))))
 
+
 (define error-codes 
   (list
-    (list 1 "Too many arguments supplied")
-    (list 2 "Too few arguments supplied")
-    (list 3 "Unbound variable")
-    (list 4 "Unasssigned Variable")
-    (list 5 "Unbound variable -- set")
-    (list 6 "Unbound variable -- unbind")
-    (list 7 "Unknown expression")
-    (list 8 "Unknown procedure")
+    (list "many-arg-err" "Too many arguments supplied")
+    (list "few-arg-err" "Too few arguments supplied")
+    (list "unbound-err" "Unbound variable")
+    (list "unassigned-err" "Unasssigned Variable")
+    (list "unbound-var-set-err" "Unbound variable -- set")
+    (list "unbound-var-unbind-err" "Unbound variable -- unbind")
+    (list "unknown-exp-err" "Unknown expression")
+    (list "unknown-proc-err" "Unknown procedure")
+    (list "zero-div-err" "Division by zero")
+    (list "zero-mod-err" "Modulus by zero")
+    (list "not-pair-car-err" "Car: element is not pair")
+    (list "not-pair-car-err" "Cdr: element is not pair")
+    (list "not-pair-set-car-err" "Set-Car!: element is not pair")
+    (list "not-pair-set-cdr-err" "Set-Cdr!: element is not pair")
+    (list)
   ))
+
+(define (error? result) (and (string? result) (string-contains result "-err")))
 
 (define (get-error-text code) (cadr (assoc code error-codes)))
 
-(define (extend-environment vars vals base-env)
-(let ((result (extend-environment-base vars vals base-env)))
-  (if (number? result) (error (get-error-text result)) result)))
+(define (try func . args) 
+  (let 
+    ((result (apply func args))) 
+      (if (error? result) (error (get-error-text result)) result)
+      ))
+
+(define (extend-environment vars vals base-env) (try extend-environment-base vars vals base-env))
 
 (define (extend-environment-base vars vals base-env)
   (if (= (length vars) (length vals))
     (cons (make-frame vars vals) base-env)
-    (if (< (length vars) (length vals)) 1 2)))
+    (if (< (length vars) (length vals)) "many-arg-err" "few-arg-err")))
 
-(define (lookup-variable-value var env)
-  (let ((result (lookup-variable-value-base var env)))
-  (if (number? result) (error (get-error-text result) var) result )))
+(define (lookup-variable-value var env) (try lookup-variable-value-base var env))
 
 (define (lookup-variable-value-base var env)
   (define (env-loop env)
     (define (scan vars vals)
       (cond 
 	((null? vars) (env-loop (enclosing-environment env)))
-	((eq? var (car vars)) (let ((value (car vals))) (if (eq? value '*unassigned*) 4 value)))
+	((eq? var (car vars)) (let ((value (car vals))) (if (eq? value '*unassigned*) "unassigned-err" value)))
 	(else (scan (cdr vars) (cdr vals)))))
     (if (eq? env the-empty-environment)
-      3
+      "unbound-err"
       (let ((frame (first-frame env)))
 	(scan (frame-variables frame)
 	      (frame-values frame)))))
@@ -251,9 +263,7 @@
   (env-loop env))
 
 
-(define (set-variable-value! var val env)
- (let ((result (set-variable-value!-base var val env)))
- (if (number? result) (error (get-error-text result) var))))  
+(define (set-variable-value! var val env) (try set-variable-value!-base var val env))
 
 (define (set-variable-value!-base var val env)
   (define (env-loop env)
@@ -263,7 +273,7 @@
 	((eq? var (car vars)) (set-car! vals val))
 	(else (scan (cdr vars) (cdr vals)))))
     (if (eq? env the-empty-environment)
-      5
+      "unbound-var-set-err"
       (let ((frame (first-frame env)))
 	(scan (frame-variables frame)
 	      (frame-values frame)))))
@@ -294,9 +304,7 @@
 
 (define (unbind-variable exp) (cadr exp))
 
-(define (unbind var env)
-(let ((result (unbind-base var env)))
-(if (number? result) (error (get-error-text result) var))))
+(define (unbind var env) (try unbind-base var env))
 
 (define (unbind-base var env)
     (define (env-loop env)
@@ -308,7 +316,7 @@
 	   (set! vars (cdr vars)))
 	  (else (scan (cdr vars) (cdr vals)))))
       (if (eq? env the-empty-environment)
-      6
+      "unbound-var-unbind-err"
 	(let ((frame (first-frame env)))
 	  (scan (frame-variables frame)
 		(frame-values frame)))))
