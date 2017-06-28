@@ -789,7 +789,7 @@ dispatch)))
     (list 'filter filter)			(list 'length length)			
     (list 'set-car! set-car!)	(list 'set-cdr! set-cdr!)	
     (list 'even? even?)				(list 'member member)
-    (list 'abs abs)						(list 'user-inital-environment '())  
+    (list 'abs abs)						(list '> >)		
     (list 'assoc assoc)				(list 'equal? equal?)	
     (list 'string=? string=?) (list 'substring substring)
     (list 'not not)						(list 'read read)					
@@ -798,8 +798,7 @@ dispatch)))
     (list 'append append)			(list 'caddr caddr)		
     (list 'cadr cadr)					(list 'cddr cddr)		
     (list 'eq? eq?)						(list 'odd? odd?)		
-    (list '<= <=)							(list 'print-stack-statistics (lambda () (print-stack-statistics eceval)))
-    (list '> >)											
+    (list '<= <=)							(list 'print-stack-statistics (lambda () (print-stack-statistics eceval)))		
     ))
 
 (define (get-function symbol) (primitive-eval symbol))
@@ -809,9 +808,9 @@ dispatch)))
   (define (work) 
    (let ((line (read port)))
      (if (eof-object? line)
-          'done
+		 			'done
 					(begin
-						(display line) (newline)
+						;(display line) (newline)
 						(primitive-eval line)
 						(if (pair? (cadr line)) 
 						(let ((name (caadr line)))
@@ -875,7 +874,7 @@ dispatch)))
 		(goto (reg continue))
 
 		ev-variable
-		(assign val (op lookup-variable-value) (reg exp) (reg env))
+		(assign val (op lookup-variable-value-base) (reg exp) (reg env))
 		(goto (reg continue))
 
 		ev-quoted
@@ -956,7 +955,7 @@ dispatch)))
 		compound-apply
 		(assign unev (op procedure-parameters) (reg proc))
 		(assign env (op procedure-environment) (reg proc))
-		(assign env (op extend-environment) (reg unev) (reg argl) (reg env))
+		(assign env (op extend-environment-base) (reg unev) (reg argl) (reg env))
 		(assign unev (op procedure-body) (reg proc))
 		(goto (label ev-sequence))
 
@@ -1020,7 +1019,7 @@ dispatch)))
 		(restore continue)
 		(restore env)
 		(restore unev)
-		(perform (op set-variable-value!) (reg unev) (reg val) (reg env))
+		(perform (op set-variable-value!-base) (reg unev) (reg val) (reg env))
 		(assign val (const ok))
 		(goto (reg continue))
 

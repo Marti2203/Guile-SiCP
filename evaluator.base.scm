@@ -221,7 +221,7 @@
 
 (define (lookup-variable-value var env)
   (let ((result (lookup-variable-value-base var env)))
-  (if (number? result) (error (get-error-text result) var))))
+  (if (number? result) (error (get-error-text result) var) result )))
 
 (define (lookup-variable-value-base var env)
   (define (env-loop env)
