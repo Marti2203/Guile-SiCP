@@ -1247,3 +1247,48 @@ dispatch)))
 
 	(define (compile-cond exp target linkage)
 	(compile-if (cond->if exp) target linkage))
+
+
+(define (compile-sequence seq target linkage)
+ (if (last-exp? seq)
+ (compile (first-exp seq) target linkage)
+ (preserving ’(env continue)
+ (compile (first-exp seq) target ’next)
+ (compile-sequence (rest-exps seq) target linkage))))
+
+
+ (define (make-compiled-procedure entry env)
+ (list ’compiled-procedure entry env))
+(define (compiled-procedure? proc)
+ (tagged-list? proc ’compiled-procedure))
+(define (compiled-procedure-entry c-proc) (cadr c-proc))
+(define (compiled-procedure-env c-proc) (caddr c-proc))
+
+(define (compile-lambda exp target linkage)
+ (let (
+	 (proc-entry (make-label ’entry))
+	 (after-lambda (make-label ’after-lambda)))
+ (let ((lambda-linkage (if (eq? linkage ’next) after-lambda linkage)))
+	 (append-instruction-sequences
+	 (tack-on-instruction-sequence
+	 (end-with-linkage lambda-linkage
+	 (make-instruction-sequence ’(env) (list target)
+	 ‘((assign ,target (op make-compiled-procedure) (label ,proc-entry) (reg env)))))
+ (compile-lambda-body exp proc-entry))
+ after-lambda))))
+
+ (define (compile-lambda-body exp proc-entry)
+ (let ((formals (lambda-parameters exp)))
+ (append-instruction-sequences
+ (make-instruction-sequence ’(env proc argl) ’(env)
+ ‘(,proc-entry
+ (assign env (op compiled-procedure-env) (reg proc))
+ (assign env (op extend-environment) (const ,formals) (reg argl) (reg env))))
+ (compile-sequence (lambda-body exp) ’val ’return))))
+
+ (define (compile-application exp target linkage)
+ (let (
+	 (proc-code (compile (operator exp) ’proc ’next))
+	 (operand-codes (map (lambda (operand) (compile operand ’val ’next)) (operands exp))))
+	 (preserving ’(env continue) proc-code
+	 (preserving ’(proc continue) (construct-arglist operand-codes) (compile-procedure-call target linkage)))))
