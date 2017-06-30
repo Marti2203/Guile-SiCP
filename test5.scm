@@ -844,8 +844,6 @@ dispatch)))
 		print-result
 		(perform (op print-stack-statistics))
 		(perform (op announce-output) (const ";;; EC-Eval value:"))
-		(test (op error?) (reg val))
-		(branch (label signal-error))
 		(perform (op user-print) (reg val))
 		(goto (label read-eval-print-loop))
 
@@ -902,8 +900,14 @@ dispatch)))
 		(assign unev (op operands) (reg exp))
 		(save unev)
 		(assign exp (op operator) (reg exp))
+		(test (op symbol?) (reg exp))
+		(branch (label ev-symbol-exp))
 		(assign continue (label ev-appl-did-operator))
 		(goto (label eval-dispatch))
+
+		ev-symbol-exp
+		(assign exp (op lookup-variable-value-base) (reg exp) (reg env))
+		;(goto (label ev-appl-did-operation)) uncomment if inserting between these routiness
 
 		ev-appl-did-operator
 		(restore unev) ; the operands
@@ -958,6 +962,8 @@ dispatch)))
 
 		primitive-apply
 		(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
+		(test (op error?) (reg val))
+		(branch (label signal-error))
 		(restore continue)
 		(goto (reg continue))
 
@@ -1151,3 +1157,30 @@ dispatch)))
 		(perform (op user-print) (reg val))
 		(goto (label read-eval-print-loop))
 	      )))
+
+
+(define (compile exp target linkage)
+ (cond 
+ ((self-evaluating? exp) (compile-self-evaluating exp target linkage))
+ ((quoted? exp) (compile-quoted exp target linkage))
+ ((variable? exp) (compile-variable exp target linkage))
+ ((assignment? exp) (compile-assignment exp target linkage))
+ ((definition? exp) (compile-definition exp target linkage))
+ ((if? exp) (compile-if exp target linkage))
+ ((lambda? exp) (compile-lambda exp target linkage))
+ ((begin? exp) (compile-sequence (begin-actions exp) target linkage))
+ ((cond? exp) (compile (cond->if exp) target linkage))
+ ((application? exp) (compile-application exp target linkage))
+ (else (error "Unknown expression type -- COMPILE" exp))))
+
+(define (make-instruction-sequence needs modifies statements)
+ (list needs modifies statements))
+
+ (define (compile-linkage linkage)
+ (cond 
+ ((eq? linkage ’return) (make-instruction-sequence ’(continue) ’() ’((goto (reg continue)))))
+ ((eq? linkage ’next) (empty-instruction-sequence))
+ (else (make-instruction-sequence ’() ’() ‘((goto (label ,linkage)))))))
+ 
+ (define (end-with-linkage linkage instruction-sequence)
+ (preserving ’(continue) instruction-sequence (compile-linkage linkage)))
