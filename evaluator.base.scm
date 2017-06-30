@@ -196,6 +196,39 @@
 				       (extend-environment (procedure-parameters procedure) arguments (procedure-environment procedure))))
 (else (error "Unknown procedure type -- APPLY" procedure))))
 
+(define (cond->if exp) (expand-clauses (cond-clauses exp)))
+(define (expand-clauses clauses)
+  (if (null? clauses)
+    'false ; no else clause
+    (let ((first (first-clause clauses))
+	  (rest (rest-clauses clauses)))
+      (if (cond-else-clause? first)
+	(if (null? rest)
+	  (sequence->exp (cond-actions first))
+	  (error "ELSE clause isn’t last -- COND->IF" clauses))
+	  (make-if (cond-predicate first)
+		   (if (predicate-special? first)
+		     (apply-m (cond-special-proc first) (cond-predicate first))
+		     (sequence->exp (cond-actions first)))
+		   (expand-clauses rest))))))
+
+(define (and->if exp env)
+  (define (work elements)
+    (if (null? (rest-operands elements)) 
+      (first-operand elements)
+      (make-if (first-operand elements)
+	       (work (rest-operands elements))
+	       false)))
+(work (order-exps (operands exp) 'right)))
+
+(define (or->if exp env)
+  (define (work elements)
+    (if (null? (rest-operands elements)) 
+      (first-operand elements)
+      (make-if (first-operand elements)
+	       true
+	       (work (rest-operands elements)))))
+(work (order-exps (operands exp) 'right)))
 
 (define error-codes 
   (list
