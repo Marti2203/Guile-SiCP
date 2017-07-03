@@ -1219,9 +1219,7 @@ dispatch)))
  (assign ,target (const ok))))))))
 
  (define label-counter 0)
-(define (new-label-number)
- (set! label-counter (+ 1 label-counter))
- label-counter)
+(define (new-label-number) (set! label-counter (+ 1 label-counter)) label-counter)
 (define (make-label name)
  (string->symbol
  (string-append (symbol->string name)
@@ -1337,30 +1335,30 @@ dispatch)))
 (define (compiled-procedure-env c-proc) (caddr c-proc))
 
 (define (compile-proc-appl target linkage)
- (cond 
- ((and (eq? target 'val) (not (eq? linkage 'return)))
- (make-instruction-sequence '(proc) all-regs
- `(
-	 (assign continue (label ,linkage))
-	 (assign val (op compiled-procedure-entry) (reg proc))
-	 (goto (reg val)))))
- ((and (not (eq? target 'val)) (not (eq? linkage 'return)))
- (let ((proc-return (make-label 'proc-return)))
- (make-instruction-sequence '(proc) all-regs
- `(
-	 (assign continue (label ,proc-return))
-	 (assign val (op compiled-procedure-entry) (reg proc))
-	 (goto (reg val))
-	 ,proc-return
-	 (assign ,target (reg val))
-	 (goto (label ,linkage))))))
+(cond ((and (eq? target 'val) (not (eq? linkage 'return)))
+(make-instruction-sequence '(proc) all-regs
+`((assign continue (label ,linkage))
+(assign val (op compiled-procedure-entry)
+(reg proc))
+(goto (reg val)))))
+((and (not (eq? target 'val))(not (eq? linkage 'return)))
+(let ((proc-return (make-label 'proc-return)))
+(make-instruction-sequence '(proc) all-regs
+`((assign continue (label ,proc-return))
+(assign val (op compiled-procedure-entry)
+(reg proc))
+(goto (reg val))
+,proc-return
+(assign ,target (reg val))
+(goto (label ,linkage))))))
 ((and (eq? target 'val) (eq? linkage 'return))
- (make-instruction-sequence ’(proc continue) all-regs
- '(
-	 (assign val (op compiled-procedure-entry) (reg proc))
-	 (goto (reg val)))))
- ((and (not (eq? target 'val)) (eq? linkage 'return))
- (error "return linkage, target not val -- COMPILE" target))))
+(make-instruction-sequence ’(proc continue) all-regs
+`((assign val (op compiled-procedure-entry)
+(reg proc))
+(goto (reg val)))))
+((and (not (eq? target 'val)) (eq? linkage 'return))
+(error "return linkage, target not val -- COMPILE"
+target))))
 
 
  (define (registers-needed s)
@@ -1375,14 +1373,14 @@ dispatch)))
  (memq reg (registers-modified seq)))
 
  (define (list-union s1 s2)
- (cond ((null? s1) s2)
- ((memq (car s1) s2) (list-union (cdr s1) s2))
- (else (cons (car s1) (list-union (cdr s1) s2)))))
+ (cond 
+	 ((null? s1) s2) ((memq (car s1) s2) (list-union (cdr s1) s2))
+	 (else (cons (car s1) (list-union (cdr s1) s2)))))
 (define (list-difference s1 s2)
- (cond ((null? s1) '())
- ((memq (car s1) s2) (list-difference (cdr s1) s2))
- (else (cons (car s1)
- (list-difference (cdr s1) s2)))))
+ (cond 
+	 ((null? s1) '())
+	 ((memq (car s1) s2) (list-difference (cdr s1) s2))
+	 (else (cons (car s1)(list-difference (cdr s1) s2)))))
 
  (define (append-instruction-sequences . seqs)
  (define (append-2-sequences seq1 seq2)
@@ -1423,6 +1421,6 @@ dispatch)))
  (list-union (registers-modified seq1) (registers-modified seq2))
  (append (statements seq1) (statements seq2))))
 
-(define all-regs '(env proc val argl unev) )
+(define all-regs '(env proc val argl unev continue) )
 
- (compile '(define (factorial n) (if (= n 1) 1 (* (factorial (- n 1)) n))) 'val 'next)
+;(compile '(define (factorial n) (if (= n 1) 1 (* (factorial (- n 1)) n))) 'val 'next)
