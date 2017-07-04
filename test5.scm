@@ -755,8 +755,7 @@ dispatch)))
   (define port (open-input-file file-name))
   (define (work number) 
    (let ((line (read port)))
-     (if (eof-object? line)
-          'done
+     (if (not (eof-object? line))
           (begin (evaluator line the-global-environment) ;(display number) (display "\t") (display line) (newline)  
 		 (work (+ 1 number))))))
   (work 0) 
@@ -815,7 +814,7 @@ dispatch)))
   (define (work) 
    (let ((line (read port)))
      (if (eof-object? line)
-		 			'done
+		 "Imported Primitives\n"
 					(begin
 						;(display line) (newline)
 						(primitive-eval line)
@@ -1225,6 +1224,8 @@ dispatch)))
  (string-append (symbol->string name)
  (number->string (new-label-number)))))
 
+(define (make-line symbol) (string-append (symbol->string symbol) "\n"))
+
  (define (compile-if exp target linkage)
  (let (
 	 (t-branch (make-label 'true-branch))
@@ -1352,7 +1353,7 @@ dispatch)))
 (assign ,target (reg val))
 (goto (label ,linkage))))))
 ((and (eq? target 'val) (eq? linkage 'return))
-(make-instruction-sequence ’(proc continue) all-regs
+(make-instruction-sequence '(proc continue) all-regs
 `((assign val (op compiled-procedure-entry)
 (reg proc))
 (goto (reg val)))))
@@ -1423,4 +1424,11 @@ target))))
 
 (define all-regs '(env proc val argl unev continue) )
 
-;(compile '(define (factorial n) (if (= n 1) 1 (* (factorial (- n 1)) n))) 'val 'next)
+(define (compile-to code file)
+(define port (open-output-file file))
+(display (compile code 'val 'next) port)
+(close-output-port port))
+
+;(compile-to '(define (factorial n) (if (= n 1) 1 (* (factorial (- n 1)) n)))  "firstFac.txt")
+;(compile-to '(define (factorial-alt n) (if (= n 1) 1 (* n (factorial-alt (- n 1))))) "secondFac.txt")
+;(compile-to '(define (factorial n) (define (iter product counter) (if (> counter n) product (iter (* counter product) (+ counter 1)))) (iter 1 1)) "thirdFac.txt")
