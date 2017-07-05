@@ -773,6 +773,8 @@ dispatch)))
 (define (set-car!-checked x y) (if (not (pair? x)) "not-pair-set-car-err" (set-car! x y)))
 (define (set-cdr!-checked x y) (if (not (pair? x)) "not-pair-set-cdr-err" (set-cdr! x y)))
 
+(load "evaluator.base.scm")
+
 (define primitive-procedures
   (list 
     (list '- -)								(list 'close-input-port close-input-port) 
@@ -817,7 +819,6 @@ dispatch)))
 		 "Imported Primitives\n"
 					(begin
 						;(display line) (newline)
-						(primitive-eval line)
 						(if (pair? (cadr line)) 
 						(let ((name (caadr line)))
 						(set! primitive-procedures (cons (list name (get-function name)) primitive-procedures)))) ;(display number) (display "\t") (display line) (newline)  
