@@ -842,6 +842,8 @@ dispatch)))
 		
 		
 		print-result
+		(test (op error?) (reg val))
+		(branch (label signal-error))
 		(perform (op print-stack-statistics))
 		(perform (op announce-output) (const ";;; EC-Eval value:"))
 		(perform (op user-print) (reg val))
@@ -900,13 +902,14 @@ dispatch)))
 		(assign unev (op operands) (reg exp))
 		(save unev)
 		(assign exp (op operator) (reg exp))
-		(test (op symbol?) (reg exp))
-		(branch (label ev-symbol-exp))
+		;(test (op symbol?) (reg exp))
+		;(branch (label ev-symbol-exp))
 		(assign continue (label ev-appl-did-operator))
 		(goto (label eval-dispatch))
 
-		ev-symbol-exp
-		(assign exp (op lookup-variable-value-base) (reg exp) (reg env))
+		;ev-symbol-exp
+		;what to do when i have a symbol?!
+		;(assign proc (op lookup-variable-value-base) (reg exp) (reg env))
 		;(goto (label ev-appl-did-operation)) uncomment if inserting between these routiness
 
 		ev-appl-did-operator
@@ -1272,12 +1275,10 @@ dispatch)))
 	 (append-instruction-sequences
 		 (tack-on-instruction-sequence
 			 (end-with-linkage lambda-linkage
-				 (make-instruction-sequence 
-					 '(env) 
-					 (list target) 
+				 (make-instruction-sequence '(env) (list target) 
 					 `((assign ,target (op make-compiled-procedure) (label ,proc-entry) (reg env)))))
-			  (compile-lambda-body exp proc-entry))
- after-lambda))))
+					 (compile-lambda-body exp proc-entry))
+				after-lambda))))
 
  (define (compile-lambda-body exp proc-entry)
  (let ((formals (lambda-parameters exp)))
