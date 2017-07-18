@@ -51,7 +51,7 @@
 (define (env? exp) (tagged-list? exp 'env))
 (define (letrec? exp) (tagged-list? exp 'letrec))
 (define (require? exp) (tagged-list? exp 'require))
-
+(define (exit? exp) (tagged-list? exp 'exit))
 
 
 (define (prime? n) (= n (smallest-divisor n)))
