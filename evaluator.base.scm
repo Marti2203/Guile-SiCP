@@ -449,5 +449,6 @@
 						 (procedure-parameters object)
 						 (procedure-body object)
 						 '<procedure-env>))))
-    ((thunk? object) (display (thunk-exp object)))
+    ((thunk? object) (display (thunk-exp object))
+    ((compiled-procedure? object) (display ’<compiled-procedure>)))
     (else (display object))))

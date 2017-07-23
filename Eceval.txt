@@ -1,4 +1,6 @@
 ( () () (
+  	    
+		(branch (label external-entry))
 		read-eval-print-loop
 		(perform (op initialize-stack))
 		(perform (op prompt-for-input) (const ";;; EC-Eval input:"))
@@ -124,13 +126,19 @@
 		(assign argl (reg unev))
 		(assign proc (reg val))
 		(goto (label apply-dispatch))
-
+		
 		apply-dispatch
 		(test (op primitive-procedure?) (reg proc))
 		(branch (label primitive-apply))
 		(test (op compound-procedure?) (reg proc))
 		(branch (label compound-apply))
+		(test (op compiled-procedure?) (reg proc))(branch (label compiled-apply))
 		(goto (label unknown-procedure-type))
+		
+		compiled-apply
+		(restore continue)
+		(assign val (op compiled-procedure-entry) (reg proc))
+		(goto (reg val))
 
 		primitive-apply
 		(assign val (op apply-primitive-procedure) (reg proc) (reg argl))
@@ -329,6 +337,11 @@
 		(perform (op user-print) (reg val))
 		(goto (label read-eval-print-loop))
 	    
-        exit
+		external-entry
+		(perform (op initialize-stack))
+		(assign env (op get-global-environment))
+		(assign continue (label print-result))
+		(goto (reg val))
 
+        exit
         ))
