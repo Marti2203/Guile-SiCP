@@ -431,7 +431,7 @@ dispatch)))
       (error "Bad BRANCH instruction -- ASSEMBLE" inst))))
 
 (define (branch-dest branch-instruction)
-(cadr branch-instruction))
+ (cadr branch-instruction))
 
 (define (make-goto inst machine labels pc)
   (let ((dest (goto-dest inst)))
@@ -448,7 +448,7 @@ dispatch)))
       (else (error "Bad GOTO instruction -- ASSEMBLE" inst)))))
 
 (define (goto-dest goto-instruction)
-(cadr goto-instruction))
+ (cadr goto-instruction))
 
 (define (make-save inst machine stack pc)
   (let ((name (stack-inst-reg-name inst)))
@@ -466,7 +466,7 @@ dispatch)))
       (set-contents! reg (pop stack))
       (advance-pc pc)))))
 (define (stack-inst-reg-name stack-instruction)
-(cadr stack-instruction))
+ (cadr stack-instruction))
 
 (define (make-save-table inst machine stack pc)
   (let ((name (stack-inst-reg-name inst)))
@@ -482,7 +482,7 @@ dispatch)))
       (set-contents! reg (pop-table-strict stack name inst))
       (advance-pc pc)))))
 (define (stack-inst-reg-name stack-instruction)
-(cadr stack-instruction))
+ (cadr stack-instruction))
 
 (define (make-perform inst machine labels operations pc)
   (let ((action (perform-action inst)))
@@ -810,6 +810,8 @@ dispatch)))
     (list 'cadr cadr)					(list 'cddr cddr)		
     (list 'eq? eq?)						(list 'print-stack-statistics (lambda () (print-stack-statistics eceval)))
 		(list 'make-compiled-procedure make-compiled-procedure)
+		(list 'compiled-procedure? compiled-procedure?)
+		(list 'compiled-procedure-entry compiled-procedure-entry)
     ))
 
 (define (primitive? func) (if (assoc func primitive-procedures) true false))
@@ -890,7 +892,7 @@ dispatch)))
 	   (assign (reg env) (op get-global-environment))	 
 		 (assign ,target (op lookup-variable-value) (const ,exp) (reg env))
 		 (restore env)))))
-	 `((assign ,target (op lookup-lexical-address) (const ,(location exp compile-time-env)) (reg env))))
+	 `((assign ,target (op lookup-lexical-address) (const ,compile-time-address) (reg env))))
  
 (define (compile-assignment exp target linkage compile-time-env)
  (let ((var (assignment-variable exp))
@@ -997,7 +999,7 @@ dispatch)))
 				(preserving 
 					'(proc continue) 
 					(construct-arglist operand-codes) 
-					(compile-procedure-call target linkage)))))
+					(compile-procedure-call target linkage compile-time-env)))))
 
 
 (define (construct-arglist operand-codes)
@@ -1026,14 +1028,13 @@ dispatch)))
 		(preserving '(env) code-to-get-first-arg (code-to-get-rest-args-left (cdr operand-codes)))))))
 
 (define (code-to-get-rest-args-left operand-codes)
- (let (
-	 (code-for-next-arg (preserving '(argl) (car operand-codes)
- (make-instruction-sequence '(val argl) '(argl) '((assign argl (op append) (reg argl) (reg val)))))))
- (if (null? (cdr operand-codes))
- code-for-next-arg
- (preserving '(env) code-for-next-arg (code-to-get-rest-args (cdr operand-codes))))))
+ (let ((code-for-next-arg (preserving '(argl) (car operand-codes)
+  (make-instruction-sequence '(val argl) '(argl) '((assign argl (op append) (reg argl) (reg val)))))))
+  (if (null? (cdr operand-codes))
+   code-for-next-arg
+   (preserving '(env) code-for-next-arg (code-to-get-rest-args (cdr operand-codes))))))
 
-(define (compile-procedure-call target linkage)
+(define (compile-procedure-call target linkage compile-time-env)
 	 (let (
 		 (primitive-branch (make-label 'primitive-branch))
 		 (compiled-branch (make-label 'compiled-branch))
@@ -1042,7 +1043,7 @@ dispatch)))
 				 (append-instruction-sequences
 					 (make-instruction-sequence '(proc) '() `((test (op primitive-procedure?) (reg proc)) (branch (label ,primitive-branch))))
 					 (parallel-instruction-sequences
-						 (append-instruction-sequences compiled-branch (compile-proc-appl target compiled-linkage))
+						 (append-instruction-sequences compiled-branch (compile-proc-appl target compiled-linkage compile-time-env))
 						 (append-instruction-sequences primitive-branch (end-with-linkage linkage
 							 (make-instruction-sequence '(proc argl) (list target)
 							 `((assign ,target (op apply-primitive-procedure) (reg proc) (reg argl)))))))
@@ -1092,7 +1093,7 @@ dispatch)))
  (cond 
 	 ((null? s1) '())
 	 ((memq (car s1) s2) (list-difference (cdr s1) s2))
-	 (else (cons (car s1)(list-difference (cdr s1) s2)))))
+	 (else (cons (car s1) (list-difference (cdr s1) s2)))))
 
 (define (append-instruction-sequences . seqs)
  (define (append-2-sequences seq1 seq2)
@@ -1101,10 +1102,9 @@ dispatch)))
  (list-union (registers-modified seq1) (registers-modified seq2))
  (append (statements seq1) (statements seq2))))
  (define (append-seq-list seqs)
- (if (null? seqs)
- (empty-instruction-sequence)
- (append-2-sequences (car seqs)
- (append-seq-list (cdr seqs)))))
+	(if (null? seqs)
+	(empty-instruction-sequence)
+  (append-2-sequences (car seqs) (append-seq-list (cdr seqs)))))
  (append-seq-list seqs))
 
 (define (tack-on-instruction-sequence seq body-seq)
@@ -1135,16 +1135,17 @@ dispatch)))
 
 
 (define (compile-open-primitive-2 exp target linkage compile-time-env)
+ (display exp) 
  (end-with-linkage linkage 
 	(append-instruction-sequences
 		(spread-arguments-2 (car (operands exp)) (cadr (operands exp))) 
 			(make-instruction-sequence 
-				`() 
-			  `(,target) 
+				'() 
+			   (list target) 
 			  `((assign ,target (op ,(operator exp)) (reg arg1) (reg arg2)))))))
 
 (define (spread-arguments-2 op1 op2) 
-	(preserving '(env arg1 arg2 val) (compile op1 'arg1 'next) (compile op2 'arg2 'next)))
+	(preserving '(env arg1 arg2 val) (compile op1 'arg1 'next '()) (compile op2 'arg2 'next '())))
 
 
 (define all-regs '(env proc val argl unev continue arg1 arg2) )
@@ -1198,13 +1199,17 @@ dispatch)))
 	)
 
 (define (start-eceval)
-(set! the-global-environment (setup-environment))
-(set-register-contents! eceval ’flag false)
-(start eceval))
+ (set! the-global-environment (setup-environment))
+ (set-register-contents! eceval 'flag false)
+ (start eceval))
 
 (define (compile-and-go expression)
-(let ((instructions (assemble (statements (compile expression ’val ’return)) eceval)))
-(set! the-global-environment (setup-environment))
-(set-register-contents! eceval ’val instructions)
-(set-register-contents! eceval ’flag true)
-(start eceval)))
+ (let ((instructions (assemble (statements (compile expression 'val 'return '())) eceval)))
+	(set! the-global-environment (setup-environment))
+	(set-register-contents! eceval 'val instructions)
+	(set-register-contents! eceval 'flag true)
+	(start eceval)))
+
+;(compile-and-go '(define (factorial n) (if (= n 1) 1 (* (factorial (- n 1)) n))))
+;(compile-and-go '(define (factorial-alt n) (if (= n 1) 1 (* n (factorial-alt (- n 1))))))
+;(compile-and-go '(define (factorial n) (define (iter product counter) (if (> counter n) product (iter (* counter product) (+ counter 1)))) (iter 1 1)))
